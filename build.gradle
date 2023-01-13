@@ -1,0 +1,41 @@
+plugins {
+    id 'java'
+}
+
+group 'org.example'
+version '1.0'
+
+repositories {
+    mavenCentral()
+}
+
+jar{
+    manifestContentCharset 'utf-8'
+    metadataCharset 'utf-8'
+    zip64 = true
+    duplicatesStrategy = 'exclude'
+    manifest {
+        attributes "Main-Class": "com.gsat.Main"
+        attributes 'Multi-Release': 'true'
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    } 
+    // {
+    //     exclude "META-INF/*.SF"
+    //     exclude "META-INF/*.DSA"
+    //     exclude "META-INF/*.RSA"
+    //     exclude "META-INF/*.txt"
+    // }
+}
+
+dependencies {
+    testImplementation group: 'junit', name: 'junit', version: '4.12'
+
+    implementation group: 'commons-cli', name: 'commons-cli', version: '1.4'
+    implementation group: 'org.reflections', name: 'reflections', version: '0.9.12'
+    implementation group: 'org.json', name: 'json', version: '20200518'
+    implementation group: 'me.tongfei', name: 'progressbar', version:'0.9.0'
+    // implementation project(":ghidra")
+    implementation fileTree(dir: 'lib', include: ['*jar'])
+}

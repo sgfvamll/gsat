@@ -1,0 +1,3 @@
+rootProject.name = 'gsat'
+// include ':ghidra'
+// project(':ghidra').projectDir = new File("G:\\srcenv\\ghidra")
