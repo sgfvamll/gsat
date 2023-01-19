@@ -5,6 +5,7 @@ import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.app.services.Analyzer;
 import ghidra.app.util.opinion.BinaryLoader;
 import ghidra.app.util.opinion.Loader;
+import ghidra.formats.gfilesystem.FSRL;
 import ghidra.app.util.importer.AutoImporter;
 import ghidra.app.util.importer.MessageLog;
 
@@ -16,6 +17,8 @@ import ghidra.framework.model.ProjectLocator;
 import ghidra.framework.options.Options;
 import ghidra.framework.project.DefaultProjectManager;
 import ghidra.framework.store.LockException;
+import ghidra.plugins.importer.batch.BatchInfo;
+import ghidra.plugins.importer.tasks.ImportBatchTask;
 import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSetView;
@@ -32,10 +35,13 @@ import ghidra.program.util.DefaultLanguageService;
 import ghidra.program.util.GhidraProgramUtilities;
 import ghidra.util.InvalidNameException;
 import ghidra.util.NotOwnerException;
+import ghidra.util.classfinder.ClassSearcher;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.NotFoundException;
 import ghidra.util.exception.VersionException;
+import ghidra.util.task.Task;
+import ghidra.util.task.TaskLauncher;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TaskMonitorAdapter;
 
@@ -46,6 +52,7 @@ import com.gsat.utils.CommonUtils;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -107,11 +114,12 @@ public class ProjectManager {
         this.programs = new ArrayList<>();
     }
 
-    public Program loadELFProgram(String programPath) 
+    public Program loadELFProgram(String programPath)
             throws CancelledException, DuplicateNameException, InvalidNameException, VersionException, IOException {
         File programFile = new File(programPath);
         MessageLog messageLog = new MessageLog();
-        Program program = AutoImporter.importByUsingBestGuess(programFile, domainFolder, programPath, messageLog, TaskMonitor.DUMMY);
+        Program program = AutoImporter.importByUsingBestGuess(programFile, domainFolder, programPath, messageLog,
+                TaskMonitor.DUMMY);
         this.programs.add(program);
         return program;
     }
@@ -130,8 +138,7 @@ public class ProjectManager {
                 baseAddr = "0x0";
             }
             List<Pair<String, String>> imageBaseOptions = Arrays.asList(
-                new Pair<>(Loader.COMMAND_LINE_ARG_PREFIX + "-baseAddr", baseAddr)
-            );
+                    new Pair<>(Loader.COMMAND_LINE_ARG_PREFIX + "-baseAddr", baseAddr));
             program = AutoImporter.importByUsingSpecificLoaderClassAndLcs(
                     programFile, null, BinaryLoader.class, imageBaseOptions,
                     language, language.getDefaultCompilerSpec(), this, messageLog, TaskMonitor.DUMMY);
@@ -141,6 +148,28 @@ public class ProjectManager {
             /// For program loaded by BinaryLoader, we need to manully create DomainFile. Seems not needed for elf program. 
             DomainFile df = domainFolder.createFile(program.getName(), program, TaskMonitor.DUMMY);
         }
+        return program;
+    }
+
+    public void loadBatchPrograms(String programPath) {
+        File programFile = new File(programPath);
+        BatchInfo batchInfo = new BatchInfo();
+        try {
+            batchInfo.addFile(FSRL.fromString("file://" + programFile.getAbsolutePath().replace("\\", "/")),
+                    TaskMonitor.DUMMY);
+            Task task = new ImportBatchTask(batchInfo, domainFolder, null, true, false);
+            task.run(TaskMonitor.DUMMY);
+        } catch (CancelledException | IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public Program openProgram(String folderPath, String programName)
+            throws VersionException, CancelledException, IOException {
+        Program program = (Program) domainFolder.getFolder(folderPath).getFile(programName).getDomainObject(this, true,
+                false,
+                TaskMonitor.DUMMY);
+        this.programs.add(program);
         return program;
     }
 
@@ -158,25 +187,26 @@ public class ProjectManager {
         options.setBoolean("Stack", false);
         options.setBoolean("Decompiler Parameter ID", false);
         /// Somethings extremely slow for MIPS firmwares. There may be some bugs in ClearFlowAndRepairCmd 
-        options.setBoolean("Non-Returning Functions - Discovered.Repair Flow Damage", false);    
+        options.setBoolean("Non-Returning Functions - Discovered.Repair Flow Damage", false);
         options.setBoolean("MIPS Constant Reference Analyzer", false);
         options.setBoolean("ARM Constant Reference Analyzer", false);
         program.endTransaction(txId, true);
     }
 
-    public Program autoAnalyzeProgram(Program program) {
+    public void enableAutoAnalysisManger(Program program) {
         AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-        mgr.initializeOptions();
+        mgr.reAnalyzeAll(null);
 
-        //// Print all analysis for debug
-        // List<Analyzer> analyzers = ClassSearcher.getInstances(Analyzer.class);
-        // String all_analyzers = "";
-        // for (var analyzer: analyzers) {
-        //     // Boolean isAvaiable = mgr.getAnalyzer(analyzer.getName()) != null;
-        //     // if (isAvaiable) {
-        //         all_analyzers += analyzer.getName() + ", " + analyzer.getDescription() + ", \n";
-        //     // }
-        // }
+        /// Print all analysis for debug
+        List<Analyzer> analyzers = ClassSearcher.getInstances(Analyzer.class);
+        String all_analyzers = "";
+        for (var analyzer : analyzers) {
+            Boolean isAvaiable = mgr.getAnalyzer(analyzer.getName()) != null;
+            if (isAvaiable) {
+                all_analyzers += "- " + analyzer.getName() + ", " + analyzer.getDescription() + ", \n";
+            }
+        }
+        ColoredPrint.info("Enabled Analysis: \n%s", all_analyzers);
         // try {
         //     BufferedWriter out = new BufferedWriter(new FileWriter("all_analyzers.txt"));
         //     out.write(all_analyzers);
@@ -184,11 +214,14 @@ public class ProjectManager {
         // } catch (Exception e) {
         //     e.printStackTrace();
         // }
+    }
+
+    public Program autoAnalyzeProgram(Program program) {
+        AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
 
         // Start a new transaction in order to make changes to this domain object.
         int txId = program.startTransaction("Analysis");
         try {
-            mgr.reAnalyzeAll(null);
             // mgr.startAnalysis(new ConsoleTaskMonitor());
             mgr.startAnalysis(TaskMonitor.DUMMY);
             GhidraProgramUtilities.setAnalyzedFlag(program, true);
@@ -348,7 +381,7 @@ public class ProjectManager {
         }
 
         this.project.close();
-        
+
         if (this.isTemporary) {
             try {
                 FileUtils.deleteDirectory(locator.getProjectDir());

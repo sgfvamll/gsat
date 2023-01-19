@@ -1,6 +1,7 @@
 package com.gsat.tools;
 
 import java.io.File;
+import java.nio.file.Paths;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Option;
@@ -21,7 +22,7 @@ public abstract class BaseTool {
 
     String outputFile = null; // Output raw / human-readable results
 
-    protected int analysisMode = 2;
+    protected int analysisMode = 3;
 
     static String getName() {
         throw new NotImplementedException();
@@ -33,15 +34,26 @@ public abstract class BaseTool {
 
     abstract public Boolean run();
 
+    static String getRequiredString(CommandLine cmd, String key) throws Exception {
+        if (cmd.hasOption(key)) {
+            return cmd.getOptionValue(key);
+        } else {
+            ColoredPrint.error("Required option '%s' missed. ", key);
+            throw new Exception("");
+        }
+    }
+
     static Option[] getBasicOptions() {
         return new Option[] {
                 new Option("h", "help", false, "Print help. "),
                 new Option("p", "project_dir", true, "Path to create project.(Default:tmpDir)"),
                 new Option("n", "project_name", true, "Project name. (Default: default)"),
                 new Option("s", "save_project", false, "Whether create/save the project."),
-                new Option("m", "program_load_mode", true, "How to load the program. One of {binary, elf, ghidra}. "),
+                new Option("m", "program_load_mode", true, "How to load the program. One of {binary, elf, batch, ghidra}. "),
                 new Option("f", "program", true,
-                        "Program to be analyzed.\n program_load_mode == 'binary' => this option should denote a binary file path and the tool will load and analyze the binary.\n program_load_mode == 'ghidra' => this option denotes the program name in ghidra project. "),
+                        "Program to be analyzed.\n program_load_mode == 'binary'/'elf'/'batch' => this option should denote the file path that the tool will load.\n program_load_mode == 'ghidra' => this option denotes the program name in ghidra project. "),
+                new Option("af", "analyzed_program", true,
+                        "The name of the program to be analyzed when loading in batch mode. "),
                 new Option("am", "analysis_mode", true, "Auto-analysis mode used when loading program. Can be 0 (no auto-analysis), 1 (fast-analysis), 2 (full analysis)"), 
                 new Option("l", "language_id", true, "Language id like x86:LE:32:default (for binary loading)"),
                 new Option("b", "base_address", true, "Base address (for binary loading). (Default: 0) "),
@@ -50,16 +62,17 @@ public abstract class BaseTool {
     }
 
     void analyzeProgram(Program program) {
+        manager.enableAutoAnalysisManger(program);
         if (analysisMode == 0) return;
         if (analysisMode == 1) {
             manager.disableSlowAnalysis(program);
         }
         manager.autoAnalyzeProgram(program);
-        if (analysisMode >= 2) {
+        if (analysisMode >= 3) {
             ProjectManager.doAggressiveInstructionFinder(program);
             ProjectManager.recoverMoreFunctions(program);
         }
-        if (analysisMode >= 3) {
+        if (analysisMode >= 4) {
             ProjectManager.doDecompilerParameterIDAnalysis(program);
         }
     }
@@ -70,7 +83,7 @@ public abstract class BaseTool {
             return false;
         }
 
-        String projectDir = null, projectName = null;
+        String projectDir = null, projectName = null, programTobeAnalyzed = null;
         String programLoadMode = null, programName = null;
         String languageId = null, baseAddress = null;
         Boolean saveProject = false;
@@ -81,6 +94,9 @@ public abstract class BaseTool {
             ColoredPrint.error("Should specify the program to be analyzed. ");
             return false;
         }
+        if (commandLine.hasOption("analyzed_program")) {
+            programTobeAnalyzed = commandLine.getOptionValue("analyzed_program");
+        }   
         if (commandLine.hasOption("program_load_mode")) {
             programLoadMode = commandLine.getOptionValue("program_load_mode");
         }
@@ -127,6 +143,12 @@ public abstract class BaseTool {
                     break;
                 case "ghidra":
                     program = manager.openProgram(programName);
+                    break;
+                case "batch":
+                    manager.loadBatchPrograms(programName);
+                    // programTobeAnalyzed = new File(programName).getName() + "/" + programTobeAnalyzed;
+                    ColoredPrint.info("Batch Mode: Opening %s ", programTobeAnalyzed);
+                    program = manager.openProgram(new File(programName).getName(), programTobeAnalyzed);
                     break;
             }
             // AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);

@@ -21,7 +21,7 @@ public class TaintAnalysis extends BaseTool {
     private TraceMergeOption traceMergeOption;
 
     TaintAnalysis() {
-        this.analysisMode = 3;
+        this.analysisMode = 4;
     }
 
     public static String getName() {
