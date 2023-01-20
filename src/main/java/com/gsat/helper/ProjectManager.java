@@ -40,10 +40,11 @@ import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.NotFoundException;
 import ghidra.util.exception.VersionException;
+import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.util.task.Task;
-import ghidra.util.task.TaskLauncher;
 import ghidra.util.task.TaskMonitor;
 import ghidra.util.task.TaskMonitorAdapter;
+import me.tongfei.progressbar.ProgressBar;
 
 import org.apache.commons.io.FileUtils;
 
@@ -52,7 +53,6 @@ import com.gsat.utils.CommonUtils;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -60,6 +60,8 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
 
 public class ProjectManager {
     private static String GhidraProjectSuffix = ".rep";
@@ -73,6 +75,8 @@ public class ProjectManager {
     /// Whether to persistently save the project in the disk.
     Boolean noWrite;
     Boolean isTemporary;
+
+    private int analysisTimeout = 600; // seconds 
 
     /// Given the projectDir and projectName, try to open the project if the
     /// corresponding rep file exists.
@@ -151,17 +155,27 @@ public class ProjectManager {
         return program;
     }
 
-    public void loadBatchPrograms(String programPath) {
+    public Program loadProgramFromArArchive(String programPath, String analyzedObjectName)
+            throws VersionException, CancelledException, IOException {
+        return loadProgramAmongBatch(programPath, analyzedObjectName, "|coff:///");
+    }
+
+    public Program loadProgramAmongBatch(String programPath, String targetObjName, String objRelProtocol)
+            throws VersionException, CancelledException, IOException {
+        /// TODO FIXIT: Loading the same file multiple times will always open the first program created. 
         File programFile = new File(programPath);
         BatchInfo batchInfo = new BatchInfo();
         try {
-            batchInfo.addFile(FSRL.fromString("file://" + programFile.getAbsolutePath().replace("\\", "/")),
-                    TaskMonitor.DUMMY);
+            FSRL objectFsrl = FSRL.fromString(
+                    "file://" + programFile.getAbsolutePath().replace("\\", "/") + objRelProtocol + targetObjName);
+            ColoredPrint.info("Loading with FSRL(%s)", objectFsrl.toString());
+            batchInfo.addFile(objectFsrl, TaskMonitor.DUMMY);
             Task task = new ImportBatchTask(batchInfo, domainFolder, null, true, false);
             task.run(TaskMonitor.DUMMY);
         } catch (CancelledException | IOException e) {
             e.printStackTrace();
         }
+        return openProgram(targetObjName);
     }
 
     public Program openProgram(String folderPath, String programName)
@@ -181,21 +195,27 @@ public class ProjectManager {
     }
 
     public void disableSlowAnalysis(Program program) {
-        int txId = program.startTransaction("OptionChanged");
+        int txId = program.startTransaction("OptionChanged-disableSlowAnalysis");
         Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
         options.setBoolean("Decompiler Switch Analysis", false);
         options.setBoolean("Stack", false);
-        options.setBoolean("Decompiler Parameter ID", false);
-        /// Somethings extremely slow for MIPS firmwares. There may be some bugs in ClearFlowAndRepairCmd 
+        // // Somethings extremely slow for MIPS firmwares. There may be some bugs in ClearFlowAndRepairCmd 
         options.setBoolean("Non-Returning Functions - Discovered.Repair Flow Damage", false);
+        program.endTransaction(txId, true);
+        disableConstantReferenceAnalysis(program);
+    }
+
+    public void disableConstantReferenceAnalysis(Program program) {
+        int txId = program.startTransaction("OptionChanged-disableConstantReferenceAnalysis");
+        Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
         options.setBoolean("MIPS Constant Reference Analyzer", false);
         options.setBoolean("ARM Constant Reference Analyzer", false);
+        // options.setBoolean("x86 Constant Reference Analyzer", false);
         program.endTransaction(txId, true);
     }
 
     public void enableAutoAnalysisManger(Program program) {
         AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-        mgr.reAnalyzeAll(null);
 
         /// Print all analysis for debug
         List<Analyzer> analyzers = ClassSearcher.getInstances(Analyzer.class);
@@ -216,20 +236,29 @@ public class ProjectManager {
         // }
     }
 
-    public Program autoAnalyzeProgram(Program program) {
+    public boolean autoAnalyzeProgram(Program program) {
         AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-
+        mgr.initializeOptions();
+        mgr.reAnalyzeAll(null);
+        boolean succ = true;
         // Start a new transaction in order to make changes to this domain object.
         int txId = program.startTransaction("Analysis");
         try {
+            TimedTaskMonitor timedMonitor = new TimedTaskMonitor(analysisTimeout);
             // mgr.startAnalysis(new ConsoleTaskMonitor());
-            mgr.startAnalysis(TaskMonitor.DUMMY);
-            GhidraProgramUtilities.setAnalyzedFlag(program, true);
+            mgr.startAnalysis(timedMonitor);
+            if (timedMonitor.isCancelled()) {
+                succ = false;
+                ColoredPrint.warning("Analysis Timeout. Current Timeout: %d s", analysisTimeout);
+            } else {
+                GhidraProgramUtilities.setAnalyzedFlag(program, true);
+                // Timer should be explicitly cancelled. Otherwise, it will prevent the program to continue. 
+                timedMonitor.timer.cancel();    
+            }
         } finally {
             program.endTransaction(txId, true);
         }
-        // mgr.dispose();
-        return program;
+        return succ;
     }
 
     // Decompiler Parameter ID
@@ -414,4 +443,62 @@ public class ProjectManager {
             return entries;
         }
     }
+
+    
+    public static class TimedTaskMonitor extends TaskMonitorAdapter {
+
+        private Timer timer = new Timer();
+
+        TimedTaskMonitor(int timeoutSecs) {
+            super(true);
+            timer.schedule(new TimeOutTask(), timeoutSecs * 1000);
+        }
+
+        private class TimeOutTask extends TimerTask {
+            @Override
+            public void run() {
+                TimedTaskMonitor.this.cancel();
+            }
+        }
+
+        @Override
+        public void cancel() {
+            timer.cancel(); // Terminate the timer thread
+            super.cancel();
+        }
+    }
+
+    // public static class ProcessBarMonitor extends TaskMonitorAdapter {
+    //     ProgressBar pb = new ProgressBar("Finding", 100);
+
+    //     @Override
+    //     public void setMessage(String msg) {
+            
+    //     }
+
+    //     public void initialize(long max) {
+    //         setMaximum(max);
+    //     }
+
+    //     @Override
+    //     public void setMaximum(long max) {
+    //         pb = new ProgressBar("Finding", max);
+    //     }
+
+    //     @Override
+    //     public long getMaximum() {
+    //         return pb.getMax();
+    //     }
+
+    //     @Override
+    //     public void setProgress(long value) {
+    //         pb.stepTo(value);
+    //     }
+
+    //     @Override
+    //     public void incrementProgress(long incrementAmount) {
+    //         pb.step();
+    //     }
+
+    // }
 }

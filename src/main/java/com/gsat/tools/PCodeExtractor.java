@@ -31,6 +31,7 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PcodeBlockBasic;
+import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.util.exception.InvalidInputException;
 import ghidra.util.task.TaskMonitor;
@@ -40,7 +41,7 @@ public class PCodeExtractor extends BaseTool {
     String outputFormat;
 
     public PCodeExtractor() {
-        this.analysisMode = 2; /// Normal Analysis
+        this.analysisMode = 3; /// Normal Analysis 
     }
 
     public static String getName() {
@@ -91,7 +92,21 @@ public class PCodeExtractor extends BaseTool {
                 .getAddress("0x" + Long.toHexString(Long.parseLong(address, 16) + offset));
     }
 
-    private Boolean checkCodeAddrSetSatisfied(AddressSetView requiredSet, AddressSetView realSet) {
+    static private boolean isNopInstruction(Instruction inst) {
+        if (inst.getPcode().length == 0 || inst.getMnemonicString().equals("NOP"))
+            return true;
+        if (inst.getPcode().length == 1) {
+            PcodeOp pcodeOp = inst.getPcode()[0];
+            if (pcodeOp.getMnemonic().equals("COPY")) {
+                if (pcodeOp.getOutput().equals(pcodeOp.getInput(0))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    static private Boolean checkCodeAddrSetSatisfied(AddressSetView requiredSet, AddressSetView realSet, Program program) {
         AddressSetView notIncluded = requiredSet.subtract(realSet);
         Boolean checked_good = true;
         AddressSet badSet = new AddressSet();
@@ -111,8 +126,7 @@ public class PCodeExtractor extends BaseTool {
                 if (inst != null) {
                     remainingSet = remainingSet.subtract(new AddressSet(inst.getMinAddress(), inst.getMaxAddress()));
                     /// Safely skip instructions in the delay slots or that are nops
-                    if (!(inst.isInDelaySlot() || inst.getPcode().length == 0
-                            || inst.getMnemonicString().equals("NOP"))) {
+                    if (!(inst.isInDelaySlot() || isNopInstruction(inst))) {
                         inRangeBadSet.add(inst.getMinAddress(), inst.getMaxAddress());
                     }
                 }
@@ -164,8 +178,9 @@ public class PCodeExtractor extends BaseTool {
         }
 
         /// Decompile first, decompling may fix some previous wrong analysis. 
+        int decompilingTimeSecs = 600; // decompInterface.getOptions().getDefaultTimeout() == 30
         DecompileResults dresult = decompInterface
-                .decompileFunction(func, decompInterface.getOptions().getDefaultTimeout(), TaskMonitor.DUMMY);
+                .decompileFunction(func, decompilingTimeSecs, TaskMonitor.DUMMY);
         HighFunction hfunc = dresult.getHighFunction();
 
         if (hfunc == null) {
@@ -176,9 +191,13 @@ public class PCodeExtractor extends BaseTool {
             return null;
         }
 
-        func = hfunc.getFunction();
+        return hfunc;
+    }
+
+    private boolean isHighFuncMatchRequiredBody(HighFunction hfunc, AddressSetView body) {
+        Function func = hfunc.getFunction();
         /// Check failed (2): Try grab the decompiling info and further determine its validation. 
-        if (!checkCodeAddrSetSatisfied(body, func.getBody())) {
+        if (!checkCodeAddrSetSatisfied(body, func.getBody(), program)) {
             /// func.getBody somethings is buggy. Try to get real body info from bbs here. 
             AddressSetView rawFuncBody = func.getBody();
             AddressSet realBody = new AddressSet().union(rawFuncBody);
@@ -207,18 +226,13 @@ public class PCodeExtractor extends BaseTool {
                 }
                 realBody.add(bb.getStart(), maxAddress);
             }
-            if (!checkCodeAddrSetSatisfied(body, realBody)) {
+            if (!checkCodeAddrSetSatisfied(body, realBody, program)) {
                 ColoredPrint.error(
                         "Function Range Mismatch (%s) <-> (%s) / (%s)", body, func.getBody(), realBody);
-                return null;
+                return false;
             }
         }
-
-        if (!checkCodeAddrSetSatisfied(func.getBody(), body)) {
-            ColoredPrint.warning(
-                    "Identify more code in this function (%s) <-> (%s)", body, func.getBody());
-        }
-        return hfunc;
+        return true;
     }
 
     @Override
@@ -237,7 +251,9 @@ public class PCodeExtractor extends BaseTool {
         }
 
         JSONObject binOut = new JSONObject();
-        ArrayList<Long> failedFuncs = new ArrayList<Long>();
+        ArrayList<Long> failedFuncs = new ArrayList<Long>();    /// Failed to get HighFunction
+        ArrayList<Long> underrangeFuncs = new ArrayList<Long>();/// Functions that are failed to be created to cover the given body
+        ArrayList<Long> overrangeFuncs = new ArrayList<Long>(); /// Functions created that cover the given body but more
         while (funcInfoIter.hasNext()) {
             JSONObject funcInfo = (JSONObject) funcInfoIter.next();
             Address startEa = getAddressWithOffset(addressFactory, funcInfo.getString("start_ea"), offset);
@@ -248,6 +264,16 @@ public class PCodeExtractor extends BaseTool {
             if (hfunc == null) {
                 failedFuncs.add(startEa.getOffset());
                 continue;
+            }
+
+            if (!isHighFuncMatchRequiredBody(hfunc, body)) {
+                underrangeFuncs.add(startEa.getOffset());
+            }
+
+            if (!checkCodeAddrSetSatisfied(hfunc.getFunction().getBody(), body, program)) {
+                ColoredPrint.warning(
+                        "Identify more code in this function (%s) <-> (%s)", body, hfunc.getFunction().getBody());
+                overrangeFuncs.add(startEa.getOffset());
             }
 
             JSONObject funcOut = new JSONObject();
@@ -279,7 +305,7 @@ public class PCodeExtractor extends BaseTool {
                     break;
                 }
                 case "SoN": {
-                    
+
                 }
             }
             funcOut.put("nodes", nodes);
@@ -288,9 +314,12 @@ public class PCodeExtractor extends BaseTool {
             binOut.put(String.format("%d", startEa.getOffset() - offset), funcOut);
         }
         binOut.put("failed_functions", failedFuncs);
+        binOut.put("overrange_functions", overrangeFuncs);
+        binOut.put("underrange_functions", underrangeFuncs);
 
         if (outputFile != null) {
             CommonUtils.writeString(binOut.toString(), outputFile);
+            ColoredPrint.info("[*] Results saved at %s", outputFile);
         } else {
             System.console().printf(binOut.toString(4));
         }
