@@ -10,7 +10,6 @@ import org.json.*;
 import com.gsat.utils.ColoredPrint;
 import com.gsat.utils.CommonUtils;
 
-import generic.stl.Pair;
 import ghidra.app.cmd.disassemble.DisassembleCommand;
 import ghidra.app.cmd.function.CreateFunctionCmd;
 import ghidra.app.decompiler.DecompInterface;
@@ -18,7 +17,6 @@ import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.util.opinion.ElfLoader;
 import ghidra.framework.options.Options;
-import ghidra.program.database.function.OverlappingFunctionException;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressFactory;
 import ghidra.program.model.address.AddressRange;
@@ -28,12 +26,10 @@ import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Program;
-import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PcodeBlockBasic;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.symbol.SourceType;
-import ghidra.util.exception.InvalidInputException;
 import ghidra.util.task.TaskMonitor;
 
 public class PCodeExtractor extends BaseTool {
@@ -242,12 +238,26 @@ public class PCodeExtractor extends BaseTool {
         AddressFactory addressFactory = program.getAddressFactory();
         DecompInterface decompInterface = setUpDecompiler();
 
-        Options props = program.getOptions(Program.PROGRAM_INFO);
-        String orgImageBaseStr = props.getString(ElfLoader.ELF_ORIGINAL_IMAGE_BASE_PROPERTY, "0x0");
-        long orgImageBase = Long.decode(orgImageBaseStr);
+        //// Determine the offset (between the base address in IDA and Ghidra)
         long offset = 0;
-        if (orgImageBase != program.getImageBase().getOffset()) {
-            offset = program.getImageBase().getOffset() - orgImageBase;
+        JSONObject oneFuncInfo = (JSONObject) selectedFuncs.get(0);
+        Address oneStartEa = getAddressWithOffset(addressFactory, oneFuncInfo.getString("start_ea"), offset);
+        String oneFuncName = oneFuncInfo.getString("func_name");
+        boolean determineOffsetSucc = false;
+        for (var sym: program.getSymbolTable().getSymbols(oneFuncName)) {
+            if ((sym.getAddress().getOffset() & 0xfff) == (oneStartEa.getOffset() & 0xfff)) {
+                offset = sym.getAddress().getOffset() - oneStartEa.getOffset();
+                determineOffsetSucc = true;
+            }
+        }
+        if (!determineOffsetSucc) {
+            //// Assume IDA always loads the PIE binary at 0 address and non-PIE binary at its defined entry. 
+            Options props = program.getOptions(Program.PROGRAM_INFO);
+            String orgImageBaseStr = props.getString(ElfLoader.ELF_ORIGINAL_IMAGE_BASE_PROPERTY, "0x0");
+            long orgImageBase = Long.decode(orgImageBaseStr);
+            if (orgImageBase != program.getImageBase().getOffset()) {
+                offset = program.getImageBase().getOffset() - orgImageBase;
+            }
         }
 
         JSONObject binOut = new JSONObject();
@@ -262,18 +272,18 @@ public class PCodeExtractor extends BaseTool {
             AddressSet body = addressFactory.getAddressSet(startEa, maxEa);
             HighFunction hfunc = checkedGetHFuncContaining(body, decompInterface);
             if (hfunc == null) {
-                failedFuncs.add(startEa.getOffset());
+                failedFuncs.add(startEa.getOffset() - offset);
                 continue;
             }
 
             if (!isHighFuncMatchRequiredBody(hfunc, body)) {
-                underrangeFuncs.add(startEa.getOffset());
+                underrangeFuncs.add(startEa.getOffset() - offset);
             }
 
             if (!checkCodeAddrSetSatisfied(hfunc.getFunction().getBody(), body, program)) {
                 ColoredPrint.warning(
                         "Identify more code in this function (%s) <-> (%s)", body, hfunc.getFunction().getBody());
-                overrangeFuncs.add(startEa.getOffset());
+                overrangeFuncs.add(startEa.getOffset() - offset);
             }
 
             JSONObject funcOut = new JSONObject();
