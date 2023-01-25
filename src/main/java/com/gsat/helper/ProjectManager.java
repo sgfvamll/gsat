@@ -76,7 +76,7 @@ public class ProjectManager {
     Boolean noWrite;
     Boolean isTemporary;
 
-    private int analysisTimeout = 600; // seconds 
+    private int analysisTimeout = 1200; // seconds 
 
     /// Given the projectDir and projectName, try to open the project if the
     /// corresponding rep file exists.
@@ -227,6 +227,12 @@ public class ProjectManager {
             }
         }
         ColoredPrint.info("Enabled Analysis: \n%s", all_analyzers);
+
+        // int txId = program.startTransaction("OptionChanged-enableSomeAnalysis");
+        // Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
+        // options.setBoolean("Shared Return Calls", true);
+        // program.endTransaction(txId, true);
+
         // try {
         //     BufferedWriter out = new BufferedWriter(new FileWriter("all_analyzers.txt"));
         //     out.write(all_analyzers);

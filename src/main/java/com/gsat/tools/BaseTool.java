@@ -25,7 +25,7 @@ public abstract class BaseTool {
     protected int analysisMode = 4;
 
     static String getName() {
-        throw new NotImplementedException();
+        throw new NotImplementedException("");
     }
 
     abstract Option[] getOptions();

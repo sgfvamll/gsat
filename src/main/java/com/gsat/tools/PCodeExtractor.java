@@ -31,6 +31,7 @@ import ghidra.program.model.pcode.PcodeBlockBasic;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.util.task.TaskMonitor;
+import me.tongfei.progressbar.ProgressBar;
 
 public class PCodeExtractor extends BaseTool {
     String selectedFilePath;
@@ -69,6 +70,10 @@ public class PCodeExtractor extends BaseTool {
         DecompileOptions options;
         options = new DecompileOptions();
 
+        long suggestedMaxInsts = options.getMaxInstructions(); // 100000
+        options.setMaxInstructions(Integer.MAX_VALUE);
+        ColoredPrint.info("Changing max_instructions from 0x%x to 0x%x. ", suggestedMaxInsts, Integer.MAX_VALUE);
+
         decompInterface.setOptions(options);
 
         decompInterface.toggleCCode(false);
@@ -102,7 +107,8 @@ public class PCodeExtractor extends BaseTool {
         return false;
     }
 
-    static private Boolean checkCodeAddrSetSatisfied(AddressSetView requiredSet, AddressSetView realSet, Program program) {
+    static private Boolean checkCodeAddrSetSatisfied(AddressSetView requiredSet, AddressSetView realSet,
+            Program program) {
         AddressSetView notIncluded = requiredSet.subtract(realSet);
         Boolean checked_good = true;
         AddressSet badSet = new AddressSet();
@@ -174,7 +180,8 @@ public class PCodeExtractor extends BaseTool {
         }
 
         /// Decompile first, decompling may fix some previous wrong analysis. 
-        int decompilingTimeSecs = 600; // decompInterface.getOptions().getDefaultTimeout() == 30
+        /// decompInterface.getOptions().getDefaultTimeout() == 30
+        int decompilingTimeSecs = Integer.max((int) body.getNumAddresses() / 100, 30); // Linearly with the number of instructions
         DecompileResults dresult = decompInterface
                 .decompileFunction(func, decompilingTimeSecs, TaskMonitor.DUMMY);
         HighFunction hfunc = dresult.getHighFunction();
@@ -233,10 +240,9 @@ public class PCodeExtractor extends BaseTool {
 
     @Override
     public Boolean run() {
-        JSONArray selectedFuncs = CommonUtils.readJson(selectedFilePath).getJSONArray("functions");
-        Iterator<Object> funcInfoIter = selectedFuncs.iterator();
         AddressFactory addressFactory = program.getAddressFactory();
         DecompInterface decompInterface = setUpDecompiler();
+        JSONArray selectedFuncs = CommonUtils.readJson(selectedFilePath).getJSONArray("functions");
 
         //// Determine the offset (between the base address in IDA and Ghidra)
         long offset = 0;
@@ -244,7 +250,7 @@ public class PCodeExtractor extends BaseTool {
         Address oneStartEa = getAddressWithOffset(addressFactory, oneFuncInfo.getString("start_ea"), offset);
         String oneFuncName = oneFuncInfo.getString("func_name");
         boolean determineOffsetSucc = false;
-        for (var sym: program.getSymbolTable().getSymbols(oneFuncName)) {
+        for (var sym : program.getSymbolTable().getSymbols(oneFuncName)) {
             if ((sym.getAddress().getOffset() & 0xfff) == (oneStartEa.getOffset() & 0xfff)) {
                 offset = sym.getAddress().getOffset() - oneStartEa.getOffset();
                 determineOffsetSucc = true;
@@ -261,68 +267,75 @@ public class PCodeExtractor extends BaseTool {
         }
 
         JSONObject binOut = new JSONObject();
-        ArrayList<Long> failedFuncs = new ArrayList<Long>();    /// Failed to get HighFunction
+        ArrayList<Long> failedFuncs = new ArrayList<Long>(); /// Failed to get HighFunction
         ArrayList<Long> underrangeFuncs = new ArrayList<Long>();/// Functions that are failed to be created to cover the given body
         ArrayList<Long> overrangeFuncs = new ArrayList<Long>(); /// Functions created that cover the given body but more
-        while (funcInfoIter.hasNext()) {
-            JSONObject funcInfo = (JSONObject) funcInfoIter.next();
-            Address startEa = getAddressWithOffset(addressFactory, funcInfo.getString("start_ea"), offset);
-            Address endEa = getAddressWithOffset(addressFactory, funcInfo.getString("end_ea"), offset);
-            Address maxEa = endEa.subtract(1);
-            AddressSet body = addressFactory.getAddressSet(startEa, maxEa);
-            HighFunction hfunc = checkedGetHFuncContaining(body, decompInterface);
-            if (hfunc == null) {
-                failedFuncs.add(startEa.getOffset() - offset);
-                continue;
-            }
 
-            if (!isHighFuncMatchRequiredBody(hfunc, body)) {
-                underrangeFuncs.add(startEa.getOffset() - offset);
-            }
+        Iterator<Object> funcInfoIter = selectedFuncs.iterator();
+        try (ProgressBar pb = new ProgressBar("Extracting", selectedFuncs.length())) {
+            while (funcInfoIter.hasNext()) {
+                JSONObject funcInfo = (JSONObject) funcInfoIter.next();
+                Address startEa = getAddressWithOffset(addressFactory, funcInfo.getString("start_ea"), offset);
+                Address endEa = getAddressWithOffset(addressFactory, funcInfo.getString("end_ea"), offset);
+                Address maxEa = endEa.subtract(1);
+                AddressSet body = addressFactory.getAddressSet(startEa, maxEa);
+                HighFunction hfunc = checkedGetHFuncContaining(body, decompInterface);
+                if (hfunc == null) {
+                    failedFuncs.add(startEa.getOffset() - offset);
+                    continue;
+                }
 
-            if (!checkCodeAddrSetSatisfied(hfunc.getFunction().getBody(), body, program)) {
-                ColoredPrint.warning(
-                        "Identify more code in this function (%s) <-> (%s)", body, hfunc.getFunction().getBody());
-                overrangeFuncs.add(startEa.getOffset() - offset);
-            }
+                if (!isHighFuncMatchRequiredBody(hfunc, body)) {
+                    underrangeFuncs.add(startEa.getOffset() - offset);
+                }
 
-            JSONObject funcOut = new JSONObject();
-            ArrayList<Long> nodes = new ArrayList<Long>();
-            ArrayList<Long[]> edges = new ArrayList<Long[]>();
-            JSONObject bbsOut = new JSONObject();
-            switch (outputFormat) {
-                case "ACFG": {
-                    ArrayList<PcodeBlockBasic> pCodeBBs = hfunc.getBasicBlocks();
-                    var bbIter = pCodeBBs.iterator();
-                    while (bbIter.hasNext()) {
-                        var bb = bbIter.next();
-                        long ea = bb.getStart().getOffset();
-                        nodes.add(ea - offset);
-                        for (int i = 0; i < bb.getOutSize(); i++) {
-                            long out_ea = bb.getOut(i).getStart().getOffset();
-                            edges.add(new Long[] { ea - offset, out_ea - offset });
+                if (!checkCodeAddrSetSatisfied(hfunc.getFunction().getBody(), body, program)) {
+                    ColoredPrint.warning(
+                            "Identify more code in this function (%s) <-> (%s)", body, hfunc.getFunction().getBody());
+                    overrangeFuncs.add(startEa.getOffset() - offset);
+                }
+
+                JSONObject funcOut = new JSONObject();
+                ArrayList<Long> nodes = new ArrayList<Long>();
+                ArrayList<Long[]> edges = new ArrayList<Long[]>();
+                JSONObject bbsOut = new JSONObject();
+                switch (outputFormat) {
+                    case "ACFG": {
+                        ArrayList<PcodeBlockBasic> pCodeBBs = hfunc.getBasicBlocks();
+                        var bbIter = pCodeBBs.iterator();
+                        while (bbIter.hasNext()) {
+                            var bb = bbIter.next();
+                            long ea = bb.getStart().getOffset();
+                            nodes.add(ea - offset);
+                            for (int i = 0; i < bb.getOutSize(); i++) {
+                                long out_ea = bb.getOut(i).getStart().getOffset();
+                                edges.add(new Long[] { ea - offset, out_ea - offset });
+                            }
+                            JSONObject bbOut = new JSONObject();
+                            ArrayList<String> bbMnems = new ArrayList<String>();
+                            var pcodeIter = bb.getIterator();
+                            while (pcodeIter.hasNext()) {
+                                var pcode = pcodeIter.next();
+                                bbMnems.add(pcode.getMnemonic());
+                            }
+                            bbOut.put("bb_mnems", bbMnems);
+                            bbsOut.put(String.format("%d", ea - offset), bbOut);
                         }
-                        JSONObject bbOut = new JSONObject();
-                        ArrayList<String> bbMnems = new ArrayList<String>();
-                        var pcodeIter = bb.getIterator();
-                        while (pcodeIter.hasNext()) {
-                            var pcode = pcodeIter.next();
-                            bbMnems.add(pcode.getMnemonic());
-                        }
-                        bbOut.put("bb_mnems", bbMnems);
-                        bbsOut.put(String.format("%d", ea - offset), bbOut);
+                        break;
                     }
-                    break;
-                }
-                case "SoN": {
+                    case "SoN": {
 
+                    }
                 }
+                funcOut.put("nodes", nodes);
+                funcOut.put("edges", edges);
+                funcOut.put("basic_blocks", bbsOut);
+                binOut.put(String.format("%d", startEa.getOffset() - offset), funcOut);
+
+                pb.step();
             }
-            funcOut.put("nodes", nodes);
-            funcOut.put("edges", edges);
-            funcOut.put("basic_blocks", bbsOut);
-            binOut.put(String.format("%d", startEa.getOffset() - offset), funcOut);
         }
+
         binOut.put("failed_functions", failedFuncs);
         binOut.put("overrange_functions", overrangeFuncs);
         binOut.put("underrange_functions", underrangeFuncs);
