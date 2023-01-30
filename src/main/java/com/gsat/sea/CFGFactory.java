@@ -115,7 +115,7 @@ public class CFGFactory {
                             CFGBlock orgCfgBlock = cfgBlock;
                             if (splitByAddr)
                                 cfgBlock = splitBBsByAddr.remove(instAddr);
-                            else 
+                            else
                                 cfgBlock = splitBBs.remove(opIdx);
                             cfgBlock.address = instAddr;
                             orgCfgBlock.addOut(cfgBlock);
@@ -128,7 +128,7 @@ public class CFGFactory {
                             if (target.isConstantAddress()) {
                                 int splitOffset = (int) target.getOffset();
                                 if (splitOffset <= 1) {
-                                    break splitCBr;     // Failed to split
+                                    break splitCBr; // Failed to split
                                 }
                                 int splitIdx = opIdx + splitOffset - 1;
                                 orgCfgBlock = cfgBlock;
@@ -139,7 +139,7 @@ public class CFGFactory {
                             } else if (target.isLoadedMemoryAddress()) {
                                 orgCfgBlock = cfgBlock;
                                 if (target.getOffset() <= instAddr.getOffset()) {
-                                    break splitCBr;     // Failed to split
+                                    break splitCBr; // Failed to split
                                 }
                                 targetBlock = new CFGBlock(nodeStartEa, 0);
                                 cfgBlock = new CFGBlock(op.getSeqnum().getTarget(), 0);
@@ -244,13 +244,15 @@ public class CFGFactory {
             return SoNNode.newRegisterStore(varnode.getOffset(), varnode.getSize());
         } else if (space.isMemorySpace()) {
             return SoNNode.newStackStore(varnode.getOffset(), varnode.getSize());
-        } 
+        }
         return SoNNode.newOtherStore(space.getSpaceID(), varnode.getOffset(), varnode.getSize());
     }
 
     public SoNGraph constructSeaOfNodes(CFGFunction cfgFunction) {
         SoNNode.clearIdCount();
+        cfgFunction.fixMultipleEntries();
         List<CFGBlock> nodes = cfgFunction.getBlocks();
+        Address fva = nodes.get(0).getAddress();
 
         PrototypeModel[] allCallingModels = program.getCompilerSpec().getCallingConventions();
         PrototypeModel[] callingModels = new PrototypeModel[allCallingModels.length];
@@ -260,7 +262,7 @@ public class CFGFactory {
             if (model != callingModels[0])
                 callingModels[h++] = model;
         }
-        var thisFunc = program.getFunctionManager().getFunctionAt(nodes.get(0).getAddress());
+        var thisFunc = program.getFunctionManager().getFunctionAt(fva);
         // Varnode[] unaffectedNodes = callingModels[0].getUnaffectedList();
         // AddressSpace regSpace = program.getAddressFactory().getRegisterSpace();
 
@@ -401,7 +403,7 @@ public class CFGFactory {
                         if (succ)
                             break linkCallUse;
                         /// 2. By the calling convension. 
-                        for (var storage: callingModels[0].getPotentialInputRegisterStorage(program)) {
+                        for (var storage : callingModels[0].getPotentialInputRegisterStorage(program)) {
                             for (Varnode varnode : storage.getVarnodes()) {
                                 var defStack = state.get(varnode);
                                 if (defStack != null && defStack.size() != 0) {
@@ -436,7 +438,7 @@ public class CFGFactory {
                     /// Determine the return value. That is, link data uses of the ReturnRegion node. 
                     boolean first = true;
                     SoNNode soNNode = blRegion;
-                    end.addUse(soNNode);    /// Link RETURN-s to END
+                    end.addUse(soNNode); /// Link RETURN-s to END
                     assert soNNode.op() instanceof ReturnRegion;
                     /// 1. By decompiled parameters. 
                     if (thisFunc != null && thisFunc.getReturn() != null) {
