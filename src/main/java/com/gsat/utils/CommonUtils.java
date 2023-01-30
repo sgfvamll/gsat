@@ -28,6 +28,16 @@ public class CommonUtils {
         return uuid;
     }
 
+    public static String readFile(String json_fp) {
+        File file = new File(json_fp);
+        try {
+            return new String(Files.readAllBytes(Paths.get(file.toURI())));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
     public static JSONObject readJson(String json_fp) {
         File file = new File(json_fp);
         try {

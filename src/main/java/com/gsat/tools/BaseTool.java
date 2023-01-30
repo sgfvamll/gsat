@@ -1,16 +1,15 @@
 package com.gsat.tools;
 
 import java.io.File;
-import java.nio.file.Paths;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Option;
 import org.apache.commons.lang3.NotImplementedException;
 
+import com.gsat.helper.AnalysisHelper;
 import com.gsat.helper.ProjectManager;
 import com.gsat.utils.ColoredPrint;
 
-import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.listing.Program;
 
@@ -62,31 +61,32 @@ public abstract class BaseTool {
     }
 
     void analyzeProgram(Program program) {
-        manager.enableAutoAnalysisManger(program);
+        if (analysisMode < 0) return;
+        AnalysisHelper.enableAutoAnalysisManger(program);
         if (analysisMode == 0) return;
         if (analysisMode == 1) {
-            manager.disableSlowAnalysis(program);
+            AnalysisHelper.disableSlowAnalysis(program);
         }
         if (analysisMode == 2) {
-            manager.disableConstantReferenceAnalysis(program);
+            AnalysisHelper.disableConstantReferenceAnalysis(program);
         }
-        boolean succ = manager.autoAnalyzeProgram(program);
+        boolean succ = AnalysisHelper.autoAnalyzeProgram(program);
         if (!succ && analysisMode >= 2) {
             if (analysisMode >= 3) {
-                manager.disableConstantReferenceAnalysis(program);
-                succ = manager.autoAnalyzeProgram(program);
+                AnalysisHelper.disableConstantReferenceAnalysis(program);
+                succ = AnalysisHelper.autoAnalyzeProgram(program);
             }
             if (!succ) {
-                manager.disableSlowAnalysis(program);
-                succ = manager.autoAnalyzeProgram(program);
+                AnalysisHelper.disableSlowAnalysis(program);
+                succ = AnalysisHelper.autoAnalyzeProgram(program);
             }
         }
         if (analysisMode >= 4) {
-            ProjectManager.doAggressiveInstructionFinder(program);
-            ProjectManager.recoverMoreFunctions(program);
+            AnalysisHelper.doAggressiveInstructionFinder(program);
+            AnalysisHelper.recoverMoreFunctions(program);
         }
         if (analysisMode >= 5) {
-            ProjectManager.doDecompilerParameterIDAnalysis(program);
+            AnalysisHelper.doDecompilerParameterIDAnalysis(program);
         }
     }
 
