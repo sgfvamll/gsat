@@ -109,6 +109,7 @@ public class SoNNode {
                     controlNode = SoNNode.newBrIndRegion(1);
                     break;
                 case PcodeOp.RETURN:
+                    assert false;
                     controlNode = SoNNode.newReturnRegion(1);
                     break;
                 default:

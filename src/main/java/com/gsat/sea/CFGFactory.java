@@ -105,21 +105,18 @@ public class CFGFactory {
                 PcodeOp lastCbranch = null;
                 int opIdx = 0;
                 Address instAddr = inst != null ? inst.getAddress() : null;
-                /// TODO Maybe try resolving other in-block branches. 
+                /// TODO Maybe try resolving other in-block branches. Add a new loop to handle this. 
                 while (inst != null && body.contains(instAddr)) {
                     for (PcodeOp op : inst.getPcode()) {
                         boolean splitByAddr = !splitBBsByAddr.isEmpty() && instAddr == splitBBsByAddr.firstKey();
                         boolean splitByIdx = !splitBBs.isEmpty() && opIdx == splitBBs.firstKey();
                         if (splitByAddr || splitByIdx) {
                             assert !(splitByAddr && splitByIdx);
-                            CFGBlock orgCfgBlock = cfgBlock;
                             if (splitByAddr)
                                 cfgBlock = splitBBsByAddr.remove(instAddr);
                             else
                                 cfgBlock = splitBBs.remove(opIdx);
                             cfgBlock.address = instAddr;
-                            orgCfgBlock.addOut(cfgBlock);
-                            cfgBlock.addIn(orgCfgBlock);
                         }
                         splitCBr: if (lastCbranch != null) {
                             Address target = lastCbranch.getInput(0).getAddress();
@@ -138,7 +135,8 @@ public class CFGFactory {
                                 splitBBs.put(splitIdx, targetBlock);
                             } else if (target.isLoadedMemoryAddress()) {
                                 orgCfgBlock = cfgBlock;
-                                if (target.getOffset() <= instAddr.getOffset()) {
+                                if (target.getOffset() <= instAddr.getOffset() || 
+                                    !body.contains(target)) {
                                     break splitCBr; // Failed to split
                                 }
                                 targetBlock = new CFGBlock(nodeStartEa, 0);
@@ -149,8 +147,10 @@ public class CFGFactory {
                             orgCfgBlock.addOut(targetBlock);
                             cfgBlock.addIn(orgCfgBlock);
                             targetBlock.addIn(orgCfgBlock);
+                            // TODO if cfgBlock does not fall into targetBlock?
+                            cfgBlock.addOut(targetBlock);
+                            targetBlock.addIn(cfgBlock);
                             blockList.add(cfgBlock);
-                            blockList.add(targetBlock);
                             cfgFunction.append(cfgBlock);
                             cfgFunction.append(targetBlock);
                         }
@@ -193,7 +193,10 @@ public class CFGFactory {
                     instAddr = inst.getFallThrough();
                     inst = instAddr != null ? program.getListing().getInstructionAt(instAddr) : null;
                 }
-                assert splitBBs.isEmpty();
+                boolean splitByIdx = splitBBs.size() == 1 && opIdx == splitBBs.firstKey();
+                // boolean splitByAddr = splitBBsByAddr.size() == 1 && instAddr == splitBBsByAddr.firstKey();
+                assert splitBBs.isEmpty() || splitByIdx;
+                // assert splitBBsByAddr.isEmpty() || splitByAddr;
             }
         }
         // Step 2: Process edges. 
@@ -250,6 +253,7 @@ public class CFGFactory {
 
     public SoNGraph constructSeaOfNodes(CFGFunction cfgFunction) {
         SoNNode.clearIdCount();
+        cfgFunction.fixReturnBlockHasSucc();
         cfgFunction.fixMultipleEntries();
         List<CFGBlock> nodes = cfgFunction.getBlocks();
         Address fva = nodes.get(0).getAddress();
@@ -298,10 +302,7 @@ public class CFGFactory {
         for (CFGBlock n : nodes) {
             phiNodes.add(new HashMap<>());
             /// Init Region Nodes. 
-            List<PcodeOp> pcodes = n.getPcodeOps();
-            PcodeOp last = null;
-            if (pcodes.size() > 0)
-                last = pcodes.get(pcodes.size() - 1);
+            PcodeOp last = n.getLastOp();
             SoNNode controlNode = SoNNode.newRegionFromLastOp(last, n.getSuccessors().size() == 0);
             regions.add(controlNode);
         }
@@ -355,7 +356,7 @@ public class CFGFactory {
                     getOrNewDefStack.apply(entry.getKey()).push(entry.getValue()); // Add phi defs
                 }
                 int opIdx = 0, numOps = bl.getPcodeOps().size();
-                SoNNode lastEffectNode = null;
+                SoNNode lastEffectNode = null, lastInBlockControl = null;
                 for (PcodeOp op : bl.getPcodeOps()) {
                     opIdx += 1;
                     int opc = op.getOpcode(), dataUseStart = SoNNode.dataUseStart(opc);
@@ -414,6 +415,12 @@ public class CFGFactory {
                         /// Also add the StackStore as a use. 
                         Varnode stackStore = newStoreVarNode(program.getAddressFactory().getStackSpace().getSpaceID());
                         soNNode.addUse(peekOrNewDef.apply(stackStore));
+                    }
+                    if (opIdx != numOps && SoNNode.isBlockEndControl(opc)) {
+                        if (lastInBlockControl != null) {
+                            soNNode.addUse(lastInBlockControl);
+                        }
+                        lastInBlockControl = soNNode;
                     }
                     /// Link effect edges 
                     if (SoNNode.hasEffect(opc)) {
@@ -474,6 +481,10 @@ public class CFGFactory {
                     Address contantZero = constantSpace.getAddress(0);
                     Varnode zero = new Varnode(contantZero, program.getDefaultPointerSize());
                     soNNode.setUse(0, newStorageOrConstant(zero));
+                }
+                /// Link in-block control
+                if (lastInBlockControl != null) {
+                    blRegion.addUse(lastInBlockControl);
                 }
                 /// Process region control inputs
                 for (CFGBlock pre : bl.getPredecessors()) {

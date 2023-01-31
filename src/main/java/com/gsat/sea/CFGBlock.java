@@ -5,6 +5,7 @@ import java.util.List;
 import com.gsat.sea.analysis.DAGNode;
 
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.ArrayList;
 
 import ghidra.program.model.address.Address;
@@ -16,6 +17,12 @@ public class CFGBlock implements DAGNode<CFGBlock> {
     ArrayList<PcodeOp> instructions;
     ArrayList<CFGBlock> cfgIns;
     ArrayList<CFGBlock> cfgOuts;
+
+    public static class IdComparator implements Comparator<CFGBlock> {
+        public int compare(CFGBlock o1, CFGBlock o2) {
+            return Integer.compare(o1._id, o2._id);
+        }
+    }
 
     CFGBlock(Address nodeStartEa, int speculativeNumInsts) {
         instructions = new ArrayList<>(speculativeNumInsts);
@@ -36,6 +43,13 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         _id = id;
     }
 
+    public PcodeOp getLastOp() {
+        PcodeOp last = null;
+        if (instructions.size() > 0)
+            last = instructions.get(instructions.size() - 1);
+        return last;
+    }
+
     void append(PcodeOp pcodeOp) {
         instructions.add(pcodeOp);
     }
@@ -46,6 +60,14 @@ public class CFGBlock implements DAGNode<CFGBlock> {
 
     void addIn(CFGBlock bl) {
         cfgIns.add(bl);
+    }
+
+    boolean removeOut(CFGBlock bl) {
+        return cfgOuts.remove(bl);
+    }
+
+    boolean removeIn(CFGBlock bl) {
+        return cfgIns.remove(bl);
     }
 
     public Address getAddress() {
