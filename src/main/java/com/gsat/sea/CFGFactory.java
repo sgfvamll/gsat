@@ -18,7 +18,7 @@ import com.gsat.sea.SoNOp.ReturnRegion;
 import com.gsat.sea.analysis.DAGGraph;
 import com.gsat.sea.analysis.DAGNode;
 import com.gsat.sea.analysis.LengauerTarjan;
-import com.gsat.sea.analysis.Utils.DominatorFrontiers;
+import com.gsat.sea.analysis.DominatorFrontiers;
 import com.gsat.utils.ColoredPrint;
 
 import ghidra.program.model.address.Address;
@@ -35,6 +35,7 @@ import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.listing.VariableStorage;
 import ghidra.program.model.pcode.PcodeOp;
+import ghidra.program.model.pcode.SequenceNumber;
 import ghidra.program.model.pcode.Varnode;
 
 public class CFGFactory {
@@ -46,6 +47,17 @@ public class CFGFactory {
     AddressSpace constantSpace;
     long uniqueOffset = 0;
     Varnode[] possibleReturnVarnodes;
+
+    public CFGFactory(Program program) {
+        this.program = program;
+        constantSpace = program.getAddressFactory().getConstantSpace();
+        DataTypeManager dtmanager = program.getDataTypeManager();
+        DataType undefinedPtr = dtmanager.getPointer(dtmanager.getDataType(0));
+        /// TODO Modify ghidra api to add all possible input varnodes and output varnodes
+        VariableStorage retStorage = program.getCompilerSpec().getDefaultCallingConvention()
+                .getReturnLocation(undefinedPtr, program);
+        possibleReturnVarnodes = retStorage.getVarnodes();
+    }
 
     private Varnode newUnique(int size) {
         Varnode res = new Varnode(newUniqueSpace.getAddress(uniqueOffset), size);
@@ -67,7 +79,7 @@ public class CFGFactory {
     }
 
     /// TODO Maybe allow varnodes that have intersection. 
-    private Varnode newProjsToDisjointVarnodes(Varnode[] outnodes, List<PcodeOp> oplist) {
+    private Varnode newProjsToDisjointVarnodes(Varnode[] outnodes, CFGBlock bl) {
         if (outnodes.length == 1)
             return outnodes[0];
         int allSize = 0, offset = 0;
@@ -82,24 +94,14 @@ public class CFGFactory {
             Varnode constantNode = newConstant(offset);
             subPiece.setInput(retVarnode, 0);
             subPiece.setInput(constantNode, 1);
-            oplist.add(subPiece);
+            bl.append(subPiece);
             offset += varnode.getSize();
         }
         return retVarnode;
     }
 
-    public CFGFactory(Program program) {
-        this.program = program;
-        constantSpace = program.getAddressFactory().getConstantSpace();
-        DataTypeManager dtmanager = program.getDataTypeManager();
-        DataType undefinedPtr = dtmanager.getPointer(dtmanager.getDataType(0));
-        /// TODO Modify ghidra api to add all possible input varnodes and output varnodes
-        VariableStorage retStorage = program.getCompilerSpec().getDefaultCallingConvention()
-                .getReturnLocation(undefinedPtr, program);
-        possibleReturnVarnodes = retStorage.getVarnodes();
-    }
-
-    public void adaptOp(PcodeOp op, CFGBlock bl) {
+    private void adaptOp(PcodeOp op, CFGBlock bl) {
+        /// new PcodeOp-s can be added here, but its seqnum should be set to null. 
         int opc = op.getOpcode();
         bl.append(op);
         if (opc == PcodeOp.STORE || opc == PcodeOp.LOAD) {
@@ -112,7 +114,7 @@ public class CFGFactory {
         } else if (SoNOp.isCall(opc)) {
             assert possibleReturnVarnodes.length > 0;
             op.setOutput(
-                    newProjsToDisjointVarnodes(possibleReturnVarnodes, bl.getPcodeOps()));
+                    newProjsToDisjointVarnodes(possibleReturnVarnodes, bl));
         }
     }
 
@@ -123,20 +125,15 @@ public class CFGFactory {
         JSONArray edges = cfgInfo.getJSONArray("edges");
 
         // Step 1: Disasm and build BBs. 
-        HashMap<Long, List<CFGBlock>> blockMap = new HashMap<>();
-        CFGFunction cfgFunction = new CFGFunction(nodes.length());
+        HashMap<Long, CFGBlock> blockMap = new HashMap<>();
+        CFGFunction cfgFunction = new CFGFunction(fva);
         for (Object nodeInfoObj : nodes) {
             JSONArray nodeInfo = (JSONArray) nodeInfoObj;
             Address nodeStartEa = addressFactory.getAddress(nodeInfo.getString(0));
             long nodeSize = nodeInfo.getLong(1);
             CFGBlock cfgBlock = new CFGBlock(nodeStartEa, (int) nodeSize / 2);
-            if (nodeStartEa.equals(fva))
-                cfgFunction.setRoot(cfgBlock);
-            else
-                cfgFunction.append(cfgBlock);
-            ArrayList<CFGBlock> blockList = new ArrayList<CFGBlock>();
-            blockMap.put(nodeStartEa.getOffset(), blockList);
-            blockList.add(cfgBlock);
+            cfgFunction.append(cfgBlock);
+            blockMap.put(nodeStartEa.getOffset(), cfgBlock);
             if (nodeSize == 0)
                 continue;
             /// Disasm and insert pcodes. 
@@ -154,22 +151,22 @@ public class CFGFactory {
                     adaptOp(op, cfgBlock);
                 }
                 instAddr = inst.getFallThrough();
+                if (instAddr != null && instAddr.getOffset() < inst.getAddress().getOffset()
+                        && body.contains(instAddr)) {
+                    ColoredPrint.info("Delay slot?");
+                }
                 inst = instAddr != null ? program.getListing().getInstructionAt(instAddr) : null;
-            }   
+            }
         }
         // Step 2: Process edges. 
         // TODO Ensure edge orders satisfy the branch semantics? 
         for (Object edgeInfoObj : edges) {
             JSONArray edgeInfo = (JSONArray) edgeInfoObj;
             long from = edgeInfo.getLong(0), to = edgeInfo.getLong(1);
-            List<CFGBlock> fromBls = blockMap.get(from), toBls = blockMap.get(to);
-            CFGBlock fromBl = fromBls.get(fromBls.size() - 1), toBl = toBls.get(0);
-            fromBl.addOut(toBl);
-            toBl.addIn(fromBl);
+            CFGBlock fromBl = blockMap.get(from), toBl = blockMap.get(to);
+            fromBl.linkOut(toBl);
         }
         cfgFunction.fixFlow();
-        cfgFunction.fixMultipleEntries();
-        cfgFunction.fixReturnBlockHasSucc();
         return cfgFunction;
     }
 
@@ -190,7 +187,7 @@ public class CFGFactory {
     public SoNGraph constructSeaOfNodes(CFGFunction cfgFunction) {
         SoNNode.clearIdCount();
         List<CFGBlock> nodes = cfgFunction.getBlocks();
-        Address fva = nodes.get(0).getAddress();
+        Address fva = cfgFunction.getAddress();
 
         PrototypeModel[] allCallingModels = program.getCompilerSpec().getCallingConventions();
         PrototypeModel[] callingModels = new PrototypeModel[allCallingModels.length];
@@ -289,8 +286,8 @@ public class CFGFactory {
                 for (var entry : phiNodes.get(blId).entrySet()) {
                     getOrNewDefStack.apply(entry.getKey()).push(entry.getValue()); // Add phi defs
                 }
-                int opIdx = 0, numOps = bl.getPcodeOps().size();
-                SoNNode lastEffectNode = null, lastInBlockControl = null;
+                int opIdx = 0, numOps = bl.numOps();
+                SoNNode lastEffectNode = null;
                 for (PcodeOp op : bl.getPcodeOps()) {
                     opIdx += 1;
                     int opc = op.getOpcode(), dataUseStart = SoNOp.dataUseStart(opc);
@@ -302,6 +299,8 @@ public class CFGFactory {
                         outDefStack.push(peekOrNewDef.apply(input));
                         continue;
                     }
+                    /// Assert that branches/return must be the last op. 
+                    assert opIdx == numOps || !SoNOp.isBlockEndControl(opc);
                     /// Link data uses 
                     SoNNode soNNode = (opIdx == numOps && SoNOp.isBlockEndControl(opc)) ? blRegion
                             : new SoNNode(opc, SoNOp.numDataUseOfPcodeOp(op));
@@ -350,12 +349,6 @@ public class CFGFactory {
                         Varnode stackStore = newStore(program.getAddressFactory().getStackSpace().getSpaceID());
                         soNNode.addUse(peekOrNewDef.apply(stackStore));
                     }
-                    if (opIdx != numOps && SoNOp.isBlockEndControl(opc)) {
-                        if (lastInBlockControl != null) {
-                            soNNode.addUse(lastInBlockControl);
-                        }
-                        lastInBlockControl = soNNode;
-                    }
                     /// Link effect edges 
                     if (SoNOp.hasEffect(opc)) {
                         if (lastEffectNode != null) {
@@ -369,11 +362,9 @@ public class CFGFactory {
                         Stack<SoNNode> defStack = getOrNewDefStack.apply(out);
                         defStack.push(soNNode);
                     }
-                    // for (var use : soNNode.uses) {
-                    //     if (use == null && !(soNNode.op() instanceof ReturnRegion)) {
-                    //         ColoredPrint.info("123");
-                    //     }
-                    // }
+                    for (var use : soNNode.uses) {
+                        assert use != null || soNNode.op() instanceof ReturnRegion;
+                    }
                 }
                 getReturnValue: if (bl.getSuccessors().size() == 0) {
                     /// Determine the return value. That is, link data uses of the ReturnRegion node. 
@@ -413,13 +404,9 @@ public class CFGFactory {
                     /// 3. Void return
                     soNNode.setUse(0, newStorageOrConstant(newConstant(0)));
                 }
-                /// Link in-block control
-                if (lastInBlockControl != null) {
-                    blRegion.addUse(lastInBlockControl);
-                }
                 /// Process region control inputs
-                for (CFGBlock pre : bl.getPredecessors()) {
-                    blRegion.addUse(regions.get(pre.id()));
+                for (CFGBlock pred : bl.getPredecessors()) {
+                    blRegion.addUse(regions.get(pred.id()));
                 }
                 /// Lastly, add effect uses. 
                 if (lastEffectNode != null) {
@@ -428,8 +415,8 @@ public class CFGFactory {
                 for (CFGBlock succ : bl.getSuccessors()) {
                     /// Process inputs of phi-s
                     int j = SoNOp.dataUseStart(PcodeOp.MULTIEQUAL);
-                    for (CFGBlock succPre : succ.getPredecessors()) {
-                        if (succPre == bl)
+                    for (CFGBlock succPred : succ.getPredecessors()) {
+                        if (succPred == bl)
                             break;
                         j += 1;
                     }
@@ -486,7 +473,8 @@ public class CFGFactory {
             nodeOut.put("node_mnems", nodeMnems);
             nodesVerb.put(String.format("%d", node.id()), nodeOut);
         }
-        // assert nodes.size() >= 10;
+        /// It's unlikely that a selected function is so small...
+        assert nodes.size() >= 10;
         funcOut.put("nodes", nodes);
         funcOut.put("edges", edges);
         funcOut.put("nodes_verbs", nodesVerb);

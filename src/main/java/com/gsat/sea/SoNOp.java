@@ -7,13 +7,17 @@ public class SoNOp {
     public static int numDataUseOfPcodeOp(PcodeOp op) {
         return op.getNumInputs() - dataUseStart(op.getOpcode());
     }
-    
+
     public static boolean isCall(int opc) {
         return opc == PcodeOp.CALL || opc == PcodeOp.CALLIND || opc == PcodeOp.CALLOTHER;
     }
 
     public static boolean hasEffect(int opc) {
         return isCall(opc) || opc == PcodeOp.STORE;
+    }
+
+    public static boolean hasFallThrough(int opc) {
+        return opc != PcodeOp.BRANCH && opc != PcodeOp.BRANCHIND && opc != PcodeOp.RETURN;
     }
 
     /// Check if this opcode ends a basic block
@@ -62,7 +66,7 @@ public class SoNOp {
 
     static class ConstantOp<T> extends BaseOp {
         T constant;
-        int size;   // byte size of this constant
+        int size; // byte size of this constant
 
         ConstantOp(int opc, T c, int size) {
             super(opc);
@@ -85,6 +89,7 @@ public class SoNOp {
 
     public static class MemorySpace extends BaseOp {
         long id;
+
         MemorySpace(long spaceId) {
             super(-4);
             id = spaceId;
@@ -94,6 +99,7 @@ public class SoNOp {
     static class Store extends BaseOp {
         long id;
         int size;
+
         Store(int opc, long storeId, int storeSize) {
             super(opc);
             id = storeId;
@@ -121,16 +127,18 @@ public class SoNOp {
 
     public static class OtherStore extends Store {
         long spaceId;
+
         OtherStore(long spaceId, long stackId, int storeSize) {
             super(-8, stackId, storeSize);
             this.spaceId = spaceId;
         }
     }
-    
+
     public static class Region extends BaseOp {
         Region() {
             super(-9);
         }
+
         protected Region(int opc) {
             super(opc);
         }
@@ -159,5 +167,5 @@ public class SoNOp {
             super(PcodeOp.MULTIEQUAL);
         }
     }
-    
+
 }
