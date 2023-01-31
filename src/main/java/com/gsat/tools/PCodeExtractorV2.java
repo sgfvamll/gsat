@@ -99,14 +99,13 @@ public class PCodeExtractorV2 extends BaseTool {
             JSONObject dumppedGraph = null;
             switch (outputFormat) {
                 case "ACFG":
-                    dumppedGraph  = cfgFactory.dumpACFGFrom(cfgFunction);
+                    dumppedGraph  = cfgFactory.dumpGraph(cfgFunction);
                     break;
                 case "SoN":
                     SoNGraph graph = cfgFactory.constructSeaOfNodes(cfgFunction);
-                    dumppedGraph = cfgFactory.dumpSeaOfNodes(graph);
+                    dumppedGraph = cfgFactory.dumpGraph(graph);
                     break;
             }
-            
             binOut.putOpt((String)oneCfgJson.get("start_ea"), dumppedGraph);
 
         }

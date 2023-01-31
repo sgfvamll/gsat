@@ -2,7 +2,38 @@ package com.gsat.sea;
 
 import ghidra.program.model.pcode.PcodeOp;
 
-public class Operations {
+public class SoNOp {
+
+    public static int numDataUseOfPcodeOp(PcodeOp op) {
+        return op.getNumInputs() - dataUseStart(op.getOpcode());
+    }
+    
+    public static boolean isCall(int opc) {
+        return opc == PcodeOp.CALL || opc == PcodeOp.CALLIND || opc == PcodeOp.CALLOTHER;
+    }
+
+    public static boolean hasEffect(int opc) {
+        return isCall(opc) || opc == PcodeOp.STORE;
+    }
+
+    /// Check if this opcode ends a basic block
+    public static boolean isBlockEndControl(int opc) {
+        return (opc == PcodeOp.BRANCH) || (opc == PcodeOp.CBRANCH)
+                || (opc == PcodeOp.BRANCHIND) || (opc == PcodeOp.RETURN);
+    }
+
+    public static int dataUseStart(int opc) {
+        switch (opc) {
+            case PcodeOp.BRANCH:
+            case PcodeOp.CBRANCH:
+            case PcodeOp.MULTIEQUAL:
+            case PcodeOp.RETURN:
+                return 1;
+            default:
+                return 0;
+        }
+    }
+
     public static class BaseOp {
         private int opcode;
 

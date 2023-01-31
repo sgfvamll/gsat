@@ -3,12 +3,14 @@ package com.gsat.sea;
 import java.util.List;
 import java.util.TreeSet;
 
+import com.gsat.sea.analysis.DAGGraph;
+
 import ghidra.program.model.address.Address;
 import ghidra.program.model.pcode.PcodeOp;
 
 import java.util.ArrayList;
 
-public class CFGFunction {
+public class CFGFunction implements DAGGraph<CFGBlock> {
     ArrayList<CFGBlock> blocks;
     int numEntries = 0;
 
@@ -20,6 +22,10 @@ public class CFGFunction {
     private void updateNumEntries(CFGBlock bl) {
         if (bl.getPredecessors().isEmpty())
             numEntries += 1;
+    }
+
+    public CFGBlock root() {
+        return blocks.get(0);
     }
 
     public void append(CFGBlock bl) {
@@ -48,7 +54,14 @@ public class CFGFunction {
         }
     }
 
+    /// TODO Try ensuring edges order and resolving in-block branches. 
+    ///      And merge fixReturnBlockHasSucc. 
+    public void fixFlow() {
+
+    }
+
     /// Some broken CFG has multiple entries. Add a start node to fix it. 
+    /// TODO Fix general multiple CFG heads cases. 
     public void fixMultipleEntries() {
         if (numEntries <= 1)
             return;

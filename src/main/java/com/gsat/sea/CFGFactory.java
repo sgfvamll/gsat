@@ -5,19 +5,18 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
-import java.util.SortedMap;
 import java.util.Stack;
-import java.util.TreeMap;
 import java.util.function.Function;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.gsat.helper.AnalysisHelper;
-import com.gsat.sea.Operations.ReturnRegion;
+import com.gsat.sea.SoNOp.ReturnRegion;
+import com.gsat.sea.analysis.DAGGraph;
+import com.gsat.sea.analysis.DAGNode;
 import com.gsat.sea.analysis.LengauerTarjan;
 import com.gsat.sea.analysis.Utils.DominatorFrontiers;
 import com.gsat.utils.ColoredPrint;
@@ -44,7 +43,9 @@ public class CFGFactory {
             "STORE", 16, AddressSpace.TYPE_UNIQUE, 0x328);
     AddressSpace newUniqueSpace = new GenericAddressSpace(
             "NewUnique", 16, AddressSpace.TYPE_UNIQUE, 0x329);
+    AddressSpace constantSpace;
     long uniqueOffset = 0;
+    Varnode[] possibleReturnVarnodes;
 
     private Varnode newUnique(int size) {
         Varnode res = new Varnode(newUniqueSpace.getAddress(uniqueOffset), size);
@@ -52,34 +53,80 @@ public class CFGFactory {
         return res;
     }
 
-    private Varnode newStoreVarNode(int spaceId) {
-        Address newStoreAddr = storeSpace.getAddress(spaceId);
-        return new Varnode(newStoreAddr, 4);
+    private Varnode newStore(int spaceId) {
+        Address addr = storeSpace.getAddress(spaceId);
+        return new Varnode(addr, 4);
+    }
+
+    private Varnode newConstant(long value) {
+        return newConstant(value, program.getDefaultPointerSize());
+    }
+
+    private Varnode newConstant(long value, int size) {
+        return new Varnode(constantSpace.getAddress(value), size);
+    }
+
+    /// TODO Maybe allow varnodes that have intersection. 
+    private Varnode newProjsToDisjointVarnodes(Varnode[] outnodes, List<PcodeOp> oplist) {
+        if (outnodes.length == 1)
+            return outnodes[0];
+        int allSize = 0, offset = 0;
+        /// New UNIQUE that represents the tuple of all these varnodes
+        for (var varnode : possibleReturnVarnodes) {
+            allSize += varnode.getSize();
+        }
+        Varnode retVarnode = newUnique(allSize);
+        /// Project this unique by SUBPIECE-s
+        for (var varnode : possibleReturnVarnodes) {
+            PcodeOp subPiece = new PcodeOp(null, PcodeOp.SUBPIECE, 2, varnode);
+            Varnode constantNode = newConstant(offset);
+            subPiece.setInput(retVarnode, 0);
+            subPiece.setInput(constantNode, 1);
+            oplist.add(subPiece);
+            offset += varnode.getSize();
+        }
+        return retVarnode;
     }
 
     public CFGFactory(Program program) {
         this.program = program;
+        constantSpace = program.getAddressFactory().getConstantSpace();
+        DataTypeManager dtmanager = program.getDataTypeManager();
+        DataType undefinedPtr = dtmanager.getPointer(dtmanager.getDataType(0));
+        /// TODO Modify ghidra api to add all possible input varnodes and output varnodes
+        VariableStorage retStorage = program.getCompilerSpec().getDefaultCallingConvention()
+                .getReturnLocation(undefinedPtr, program);
+        possibleReturnVarnodes = retStorage.getVarnodes();
+    }
+
+    public void adaptOp(PcodeOp op, CFGBlock bl) {
+        int opc = op.getOpcode();
+        bl.append(op);
+        if (opc == PcodeOp.STORE || opc == PcodeOp.LOAD) {
+            /// Replace the address space of the space ID constants 
+            Varnode space = op.getInput(0);
+            Varnode store = newStore((int) space.getOffset());
+            op.setInput(store, 0);
+            if (opc == PcodeOp.STORE)
+                op.setOutput(store);
+        } else if (SoNOp.isCall(opc)) {
+            assert possibleReturnVarnodes.length > 0;
+            op.setOutput(
+                    newProjsToDisjointVarnodes(possibleReturnVarnodes, bl.getPcodeOps()));
+        }
     }
 
     public CFGFunction constructCfgProgramFromJsonInfo(JSONObject cfgInfo) {
         AddressFactory addressFactory = program.getAddressFactory();
-        AddressSpace constantSpace = addressFactory.getConstantSpace();
         Address fva = addressFactory.getAddress(cfgInfo.getString("start_ea"));
         JSONArray nodes = cfgInfo.getJSONArray("nodes");
         JSONArray edges = cfgInfo.getJSONArray("edges");
-        DataTypeManager dtmanager = program.getDataTypeManager();
-
-        DataType undefinedPtr = dtmanager.getPointer(dtmanager.getDataType(0));
-        VariableStorage retStorage = program.getCompilerSpec().getDefaultCallingConvention()
-                .getReturnLocation(undefinedPtr, program);
-        Varnode[] retVarnodes = retStorage.getVarnodes();
 
         // Step 1: Disasm and build BBs. 
         HashMap<Long, List<CFGBlock>> blockMap = new HashMap<>();
         CFGFunction cfgFunction = new CFGFunction(nodes.length());
-        Iterator<Object> nodeInfoIter = nodes.iterator();
-        while (nodeInfoIter.hasNext()) {
-            JSONArray nodeInfo = (JSONArray) nodeInfoIter.next();
+        for (Object nodeInfoObj : nodes) {
+            JSONArray nodeInfo = (JSONArray) nodeInfoObj;
             Address nodeStartEa = addressFactory.getAddress(nodeInfo.getString(0));
             long nodeSize = nodeInfo.getLong(1);
             CFGBlock cfgBlock = new CFGBlock(nodeStartEa, (int) nodeSize / 2);
@@ -90,151 +137,40 @@ public class CFGFactory {
             ArrayList<CFGBlock> blockList = new ArrayList<CFGBlock>();
             blockMap.put(nodeStartEa.getOffset(), blockList);
             blockList.add(cfgBlock);
-            if (nodeSize > 0) {
-                /// Disasm and insert pcodes. 
-                Address nodeMaxEa = nodeStartEa.add(nodeSize - 1);
-                AddressSet body = addressFactory.getAddressSet(nodeStartEa, nodeMaxEa);
-                AnalysisHelper.disasmBody(program, body, false);
-                Instruction inst = program.getListing().getInstructionAt(nodeStartEa);
-                if (inst == null) {
-                    ColoredPrint.warning("Disasm inst at %x failed. ", nodeStartEa.getOffset());
-                    inst = program.getListing().getInstructionAfter(nodeStartEa);
-                }
-                SortedMap<Integer, CFGBlock> splitBBs = new TreeMap<>();
-                SortedMap<Address, CFGBlock> splitBBsByAddr = new TreeMap<>();
-                PcodeOp lastCbranch = null;
-                int opIdx = 0;
-                Address instAddr = inst != null ? inst.getAddress() : null;
-                /// TODO Maybe try resolving other in-block branches. Add a new loop to handle this. 
-                while (inst != null && body.contains(instAddr)) {
-                    for (PcodeOp op : inst.getPcode()) {
-                        boolean splitByAddr = !splitBBsByAddr.isEmpty() && instAddr == splitBBsByAddr.firstKey();
-                        boolean splitByIdx = !splitBBs.isEmpty() && opIdx == splitBBs.firstKey();
-                        if (splitByAddr || splitByIdx) {
-                            assert !(splitByAddr && splitByIdx);
-                            if (splitByAddr)
-                                cfgBlock = splitBBsByAddr.remove(instAddr);
-                            else
-                                cfgBlock = splitBBs.remove(opIdx);
-                            cfgBlock.address = instAddr;
-                        }
-                        splitCBr: if (lastCbranch != null) {
-                            Address target = lastCbranch.getInput(0).getAddress();
-                            lastCbranch = null;
-                            CFGBlock orgCfgBlock = null, targetBlock = null;
-                            if (target.isConstantAddress()) {
-                                int splitOffset = (int) target.getOffset();
-                                if (splitOffset <= 1) {
-                                    break splitCBr; // Failed to split
-                                }
-                                int splitIdx = opIdx + splitOffset - 1;
-                                orgCfgBlock = cfgBlock;
-                                targetBlock = new CFGBlock(nodeStartEa,
-                                        Integer.max((int) nodeSize / 2 - splitIdx, 0));
-                                cfgBlock = new CFGBlock(op.getSeqnum().getTarget(), splitOffset);
-                                splitBBs.put(splitIdx, targetBlock);
-                            } else if (target.isLoadedMemoryAddress()) {
-                                orgCfgBlock = cfgBlock;
-                                if (target.getOffset() <= instAddr.getOffset() || 
-                                    !body.contains(target)) {
-                                    break splitCBr; // Failed to split
-                                }
-                                targetBlock = new CFGBlock(nodeStartEa, 0);
-                                cfgBlock = new CFGBlock(op.getSeqnum().getTarget(), 0);
-                                splitBBsByAddr.put(target, targetBlock);
-                            }
-                            orgCfgBlock.addOut(cfgBlock);
-                            orgCfgBlock.addOut(targetBlock);
-                            cfgBlock.addIn(orgCfgBlock);
-                            targetBlock.addIn(orgCfgBlock);
-                            // TODO if cfgBlock does not fall into targetBlock?
-                            cfgBlock.addOut(targetBlock);
-                            targetBlock.addIn(cfgBlock);
-                            blockList.add(cfgBlock);
-                            cfgFunction.append(cfgBlock);
-                            cfgFunction.append(targetBlock);
-                        }
-                        if (op.getOpcode() == PcodeOp.STORE || op.getOpcode() == PcodeOp.LOAD) {
-                            /// Replace the address space of the space ID constants 
-                            Varnode space = op.getInput(0);
-                            Varnode store = newStoreVarNode((int) space.getOffset());
-                            op.setInput(store, 0);
-                            op.setOutput(store);
-                            cfgBlock.append(op);
-                        } else if (SoNNode.isCall(op.getOpcode())) {
-                            if (retVarnodes.length == 1) {
-                                op.setOutput(retVarnodes[0]);
-                                cfgBlock.append(op);
-                            } else {
-                                /// Projects the call results using subPiece
-                                int allSize = 0, offset = 0;
-                                for (var varnode : retVarnodes) {
-                                    allSize += varnode.getSize();
-                                }
-                                Varnode retVarnode = newUnique(allSize);
-                                op.setOutput(retVarnode);
-                                cfgBlock.append(op);
-                                for (var varnode : retVarnodes) {
-                                    PcodeOp subPiece = new PcodeOp(null, PcodeOp.SUBPIECE, 2, varnode);
-                                    Varnode constantNode = new Varnode(constantSpace.getAddress(offset),
-                                            program.getDefaultPointerSize());
-                                    subPiece.setInput(retVarnode, 0);
-                                    subPiece.setInput(constantNode, 1);
-                                    cfgBlock.append(subPiece);
-                                    offset += varnode.getSize();
-                                }
-                            }
-                        } else if (op.getOpcode() == PcodeOp.CBRANCH) {
-                            lastCbranch = op;
-                        } else
-                            cfgBlock.append(op);
-                        opIdx += 1;
-                    }
-                    instAddr = inst.getFallThrough();
-                    inst = instAddr != null ? program.getListing().getInstructionAt(instAddr) : null;
-                }
-                boolean splitByIdx = splitBBs.size() == 1 && opIdx == splitBBs.firstKey();
-                // boolean splitByAddr = splitBBsByAddr.size() == 1 && instAddr == splitBBsByAddr.firstKey();
-                assert splitBBs.isEmpty() || splitByIdx;
-                // assert splitBBsByAddr.isEmpty() || splitByAddr;
+            if (nodeSize == 0)
+                continue;
+            /// Disasm and insert pcodes. 
+            Address nodeMaxEa = nodeStartEa.add(nodeSize - 1);
+            AddressSet body = addressFactory.getAddressSet(nodeStartEa, nodeMaxEa);
+            AnalysisHelper.disasmBody(program, body, false);
+            Instruction inst = program.getListing().getInstructionAt(nodeStartEa);
+            if (inst == null) {
+                ColoredPrint.warning("Disasm inst at %x failed. ", nodeStartEa.getOffset());
+                inst = program.getListing().getInstructionAfter(nodeStartEa);
             }
+            Address instAddr = inst != null ? inst.getAddress() : null;
+            while (inst != null && body.contains(instAddr)) {
+                for (PcodeOp op : inst.getPcode()) {
+                    adaptOp(op, cfgBlock);
+                }
+                instAddr = inst.getFallThrough();
+                inst = instAddr != null ? program.getListing().getInstructionAt(instAddr) : null;
+            }   
         }
         // Step 2: Process edges. 
         // TODO Ensure edge orders satisfy the branch semantics? 
-        Iterator<Object> edgeInfoIter = edges.iterator();
-        while (edgeInfoIter.hasNext()) {
-            JSONArray edgeInfo = (JSONArray) edgeInfoIter.next();
+        for (Object edgeInfoObj : edges) {
+            JSONArray edgeInfo = (JSONArray) edgeInfoObj;
             long from = edgeInfo.getLong(0), to = edgeInfo.getLong(1);
             List<CFGBlock> fromBls = blockMap.get(from), toBls = blockMap.get(to);
             CFGBlock fromBl = fromBls.get(fromBls.size() - 1), toBl = toBls.get(0);
             fromBl.addOut(toBl);
             toBl.addIn(fromBl);
         }
+        cfgFunction.fixFlow();
+        cfgFunction.fixMultipleEntries();
+        cfgFunction.fixReturnBlockHasSucc();
         return cfgFunction;
-    }
-
-    public JSONObject dumpACFGFrom(CFGFunction cfgFunction) {
-        JSONObject funcOut = new JSONObject();
-        ArrayList<Long> nodes = new ArrayList<Long>();
-        ArrayList<Long[]> edges = new ArrayList<Long[]>();
-        JSONObject bbsOut = new JSONObject();
-        for (CFGBlock bl : cfgFunction.getBlocks()) {
-            long ea = bl.getAddress().getOffset();
-            nodes.add(ea);
-            for (CFGBlock outBl : bl.getSuccessors())
-                edges.add(new Long[] { ea, outBl.getAddress().getOffset() });
-            JSONObject bbOut = new JSONObject();
-            ArrayList<String> bbMnems = new ArrayList<String>();
-            for (PcodeOp pcode : bl.getPcodeOps()) {
-                bbMnems.add(pcode.getMnemonic());
-            }
-            bbOut.put("bb_mnems", bbMnems);
-            bbsOut.put(String.format("%d", ea), bbOut);
-        }
-        funcOut.put("nodes", nodes);
-        funcOut.put("edges", edges);
-        funcOut.put("basic_blocks", bbsOut);
-        return funcOut;
     }
 
     public SoNNode newStorageOrConstant(Varnode varnode) {
@@ -253,8 +189,6 @@ public class CFGFactory {
 
     public SoNGraph constructSeaOfNodes(CFGFunction cfgFunction) {
         SoNNode.clearIdCount();
-        cfgFunction.fixReturnBlockHasSucc();
-        cfgFunction.fixMultipleEntries();
         List<CFGBlock> nodes = cfgFunction.getBlocks();
         Address fva = nodes.get(0).getAddress();
 
@@ -359,7 +293,7 @@ public class CFGFactory {
                 SoNNode lastEffectNode = null, lastInBlockControl = null;
                 for (PcodeOp op : bl.getPcodeOps()) {
                     opIdx += 1;
-                    int opc = op.getOpcode(), dataUseStart = SoNNode.dataUseStart(opc);
+                    int opc = op.getOpcode(), dataUseStart = SoNOp.dataUseStart(opc);
                     if (opc == PcodeOp.COPY) {
                         /// Omit COPY
                         Varnode input = op.getInput(0);
@@ -369,13 +303,13 @@ public class CFGFactory {
                         continue;
                     }
                     /// Link data uses 
-                    SoNNode soNNode = (opIdx == numOps && SoNNode.isBlockEndControl(opc)) ? blRegion
-                            : new SoNNode(opc, SoNNode.numDataUseFromOp(op));
+                    SoNNode soNNode = (opIdx == numOps && SoNOp.isBlockEndControl(opc)) ? blRegion
+                            : new SoNNode(opc, SoNOp.numDataUseOfPcodeOp(op));
                     for (int i = dataUseStart; i < op.getNumInputs(); i++) {
                         Varnode input = op.getInput(i);
                         soNNode.setUse(i - dataUseStart, peekOrNewDef.apply(input));
                     }
-                    linkCallUse: if (SoNNode.isCall(opc)) {
+                    linkCallUse: if (SoNOp.isCall(opc)) {
                         /// 1. By decompiled parameters. 
                         boolean succ = false;
                         _1_linkByCalleeParams: if (opc == PcodeOp.CALL) {
@@ -392,7 +326,7 @@ public class CFGFactory {
                                     /// TODO May fix STORE output and feed stack entry (rather than stack space) here
                                     boolean isStack = varnode.getAddress().isStackAddress();
                                     if (isStack && !stackUsed) {
-                                        varnode = newStoreVarNode(varnode.getSpace());
+                                        varnode = newStore(varnode.getSpace());
                                         stackUsed = true;
                                     } else if (isStack) {
                                         continue;
@@ -413,17 +347,17 @@ public class CFGFactory {
                             }
                         }
                         /// Also add the StackStore as a use. 
-                        Varnode stackStore = newStoreVarNode(program.getAddressFactory().getStackSpace().getSpaceID());
+                        Varnode stackStore = newStore(program.getAddressFactory().getStackSpace().getSpaceID());
                         soNNode.addUse(peekOrNewDef.apply(stackStore));
                     }
-                    if (opIdx != numOps && SoNNode.isBlockEndControl(opc)) {
+                    if (opIdx != numOps && SoNOp.isBlockEndControl(opc)) {
                         if (lastInBlockControl != null) {
                             soNNode.addUse(lastInBlockControl);
                         }
                         lastInBlockControl = soNNode;
                     }
                     /// Link effect edges 
-                    if (SoNNode.hasEffect(opc)) {
+                    if (SoNOp.hasEffect(opc)) {
                         if (lastEffectNode != null) {
                             soNNode.addUse(lastEffectNode);
                         }
@@ -477,10 +411,7 @@ public class CFGFactory {
                         }
                     }
                     /// 3. Void return
-                    AddressSpace constantSpace = program.getAddressFactory().getConstantSpace();
-                    Address contantZero = constantSpace.getAddress(0);
-                    Varnode zero = new Varnode(contantZero, program.getDefaultPointerSize());
-                    soNNode.setUse(0, newStorageOrConstant(zero));
+                    soNNode.setUse(0, newStorageOrConstant(newConstant(0)));
                 }
                 /// Link in-block control
                 if (lastInBlockControl != null) {
@@ -496,7 +427,7 @@ public class CFGFactory {
                 }
                 for (CFGBlock succ : bl.getSuccessors()) {
                     /// Process inputs of phi-s
-                    int j = SoNNode.dataUseStart(PcodeOp.MULTIEQUAL);
+                    int j = SoNOp.dataUseStart(PcodeOp.MULTIEQUAL);
                     for (CFGBlock succPre : succ.getPredecessors()) {
                         if (succPre == bl)
                             break;
@@ -532,33 +463,33 @@ public class CFGFactory {
         return result;
     }
 
-    public JSONObject dumpSeaOfNodes(SoNGraph graph) {
+    public <T extends DAGNode<T>> JSONObject dumpGraph(DAGGraph<T> graph) {
         JSONObject funcOut = new JSONObject();
-        ArrayList<Long> nodes = new ArrayList<Long>();
-        ArrayList<Long[]> edges = new ArrayList<Long[]>();
-        JSONObject bbsOut = new JSONObject();
-        Stack<SoNNode> worklist = new Stack<>();
-        Set<SoNNode> nodeSet = new HashSet<>();
-        worklist.push(graph.end);
+        ArrayList<Integer> nodes = new ArrayList<Integer>();
+        ArrayList<Integer[]> edges = new ArrayList<Integer[]>();
+        JSONObject nodesVerb = new JSONObject();
+        Stack<T> worklist = new Stack<>();
+        Set<T> nodeSet = new HashSet<>();
+        worklist.push(graph.root());
         while (!worklist.isEmpty()) {
-            SoNNode node = worklist.pop();
+            T node = worklist.pop();
             nodes.add(node.id());
-            String[] bbMnems = new String[] { node.mnemonic() };
-            for (SoNNode use : node.getUses()) {
-                edges.add(new Long[] { use.id(), node.id() });
-                if (!nodeSet.contains(use)) {
-                    worklist.push(use);
-                    nodeSet.add(use);
+            for (T succ : node.getSuccessors()) {
+                edges.add(new Integer[] { node.id(), succ.id() });
+                if (!nodeSet.contains(succ)) {
+                    worklist.push(succ);
+                    nodeSet.add(succ);
                 }
             }
-            JSONObject bbOut = new JSONObject();
-            bbOut.put("bb_mnems", bbMnems);
-            bbsOut.put(String.format("%d", node.id()), bbOut);
+            JSONObject nodeOut = new JSONObject();
+            String[] nodeMnems = node.getFeatureStrs();
+            nodeOut.put("node_mnems", nodeMnems);
+            nodesVerb.put(String.format("%d", node.id()), nodeOut);
         }
-        assert nodes.size() >= 10;
+        // assert nodes.size() >= 10;
         funcOut.put("nodes", nodes);
         funcOut.put("edges", edges);
-        funcOut.put("basic_blocks", bbsOut);
+        funcOut.put("nodes_verbs", nodesVerb);
         return funcOut;
     }
 

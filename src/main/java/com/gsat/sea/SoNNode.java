@@ -3,21 +3,22 @@ package com.gsat.sea;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.gsat.sea.Operations.*;
+import com.gsat.sea.SoNOp.*;
+import com.gsat.sea.analysis.DAGNode;
 
 import ghidra.dbg.gadp.protocol.Gadp.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 
-public class SoNNode {
-    static long idCnt = 0;
+public class SoNNode implements DAGNode<SoNNode> {
+    static int idCnt = 0;
 
     public static void clearIdCount() {
         idCnt = 0;
     }
 
-    private long id;
+    private int id;
     private BaseOp op;
     List<SoNNode> uses;
 
@@ -35,7 +36,7 @@ public class SoNNode {
         assert opc != PcodeOp.MULTIEQUAL;
     }
 
-    public long id() {
+    public int id() {
         return id;
     }
 
@@ -51,6 +52,22 @@ public class SoNNode {
         return op.mnem();
     }
 
+    public int hashCode() {
+        return id;
+    }
+
+    public List<SoNNode> getPredecessors() {
+        return null;
+    }
+
+    public List<SoNNode> getSuccessors() {
+        return getUses();
+    }
+
+    public String[] getFeatureStrs() {
+        return new String[] { mnemonic() };
+    }
+
     public List<SoNNode> getUses() {
         return uses;
     }
@@ -61,36 +78,6 @@ public class SoNNode {
 
     void addUse(SoNNode inp) {
         uses.add(inp);
-    }
-
-    public static boolean isCall(int opc) {
-        return opc == PcodeOp.CALL || opc == PcodeOp.CALLIND || opc == PcodeOp.CALLOTHER;
-    }
-
-    public static boolean hasEffect(int opc) {
-        return isCall(opc) || opc == PcodeOp.STORE;
-    }
-
-    /// Check if this opcode ends a basic block
-    public static boolean isBlockEndControl(int opc) {
-        return (opc == PcodeOp.BRANCH) || (opc == PcodeOp.CBRANCH)
-                || (opc == PcodeOp.BRANCHIND) || (opc == PcodeOp.RETURN);
-    }
-
-    public static int dataUseStart(int opc) {
-        switch (opc) {
-            case PcodeOp.BRANCH:
-            case PcodeOp.CBRANCH:
-            case PcodeOp.MULTIEQUAL:
-            case PcodeOp.RETURN:
-                return 1;
-            default:
-                return 0;
-        }
-    }
-
-    public static int numDataUseFromOp(PcodeOp op) {
-        return op.getNumInputs() - dataUseStart(op.getOpcode());
     }
 
     public static SoNNode newRegionFromLastOp(PcodeOp last, boolean isReturnBlock) {

@@ -4,7 +4,6 @@ import java.util.List;
 
 import com.gsat.sea.analysis.DAGNode;
 
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.ArrayList;
 
@@ -14,7 +13,7 @@ import ghidra.program.model.pcode.PcodeOp;
 public class CFGBlock implements DAGNode<CFGBlock> {
     int _id;
     Address address;
-    ArrayList<PcodeOp> instructions;
+    ArrayList<PcodeOp> oplist;
     ArrayList<CFGBlock> cfgIns;
     ArrayList<CFGBlock> cfgOuts;
 
@@ -25,7 +24,7 @@ public class CFGBlock implements DAGNode<CFGBlock> {
     }
 
     CFGBlock(Address nodeStartEa, int speculativeNumInsts) {
-        instructions = new ArrayList<>(speculativeNumInsts);
+        oplist = new ArrayList<>(speculativeNumInsts);
         address = nodeStartEa;
         cfgIns = new ArrayList<>();
         cfgOuts = new ArrayList<>();
@@ -45,13 +44,13 @@ public class CFGBlock implements DAGNode<CFGBlock> {
 
     public PcodeOp getLastOp() {
         PcodeOp last = null;
-        if (instructions.size() > 0)
-            last = instructions.get(instructions.size() - 1);
+        if (oplist.size() > 0)
+            last = oplist.get(oplist.size() - 1);
         return last;
     }
 
     void append(PcodeOp pcodeOp) {
-        instructions.add(pcodeOp);
+        oplist.add(pcodeOp);
     }
 
     void addOut(CFGBlock bl) {
@@ -83,6 +82,15 @@ public class CFGBlock implements DAGNode<CFGBlock> {
     }
 
     public List<PcodeOp> getPcodeOps() {
-        return instructions;
+        return oplist;
+    }
+
+    public String[] getFeatureStrs() {
+        String[] bbMnems = new String[oplist.size()];
+        int idx = 0;
+        for (PcodeOp pcode : oplist) {
+            bbMnems[idx++] = pcode.getMnemonic();
+        }
+        return bbMnems;
     }
 }

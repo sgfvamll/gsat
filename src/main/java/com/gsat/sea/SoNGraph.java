@@ -1,9 +1,15 @@
 package com.gsat.sea;
 
-public class SoNGraph {
+import com.gsat.sea.analysis.DAGGraph;
+
+public class SoNGraph implements DAGGraph<SoNNode> {
     SoNNode end;
 
     SoNGraph(SoNNode endNode) {
         end = endNode;
+    }
+
+    public SoNNode root() {
+        return end;
     }
 }
