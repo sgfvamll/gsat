@@ -65,15 +65,16 @@ public class CFGFunction implements DAGGraph<CFGBlock> {
     }
 
     /// Get the first block that contains this address
-    private CFGBlock getFirstBlockContaining(SequenceNumber seq) {
-        var entry = blocks.floorEntry(seq);
-        SequenceNumber firstOpSeq = entry.getValue().getFirstOp().getSeqnum();
+    private CFGBlock getFirstBlockContaining(SequenceNumber seqnum) {
+        var entry = blocks.floorEntry(seqnum);
+        if (entry == null)
+            return null;
         CFGBlock result;
-        if (firstOpSeq.equals(seq)) {
+        if (entry.getValue().startsAt(seqnum)) {
             return entry.getValue();
         } else {
             result = entry.getValue();
-            if (!result.containingSeqNum(seq))
+            if (!result.containingSeqNum(seqnum))
                 return null;
         }
         return result;
