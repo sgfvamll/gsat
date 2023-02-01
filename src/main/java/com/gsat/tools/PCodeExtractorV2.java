@@ -13,10 +13,7 @@ import com.gsat.utils.CommonUtils;
 
 import ghidra.app.util.opinion.ElfLoader;
 import ghidra.framework.options.Options;
-import ghidra.framework.store.LockException;
 import ghidra.program.model.address.Address;
-import ghidra.program.model.address.AddressOutOfBoundsException;
-import ghidra.program.model.address.AddressOverflowException;
 import ghidra.program.model.listing.Program;
 
 public class PCodeExtractorV2 extends BaseTool {
@@ -93,21 +90,20 @@ public class PCodeExtractorV2 extends BaseTool {
 
         CFGFactory cfgFactory = new CFGFactory(program);
         JSONObject binOut = new JSONObject();
-        for (var oneCfgInfo: cfgInfos) {
+        for (var oneCfgInfo : cfgInfos) {
             JSONObject oneCfgJson = (JSONObject) oneCfgInfo;
             CFGFunction cfgFunction = cfgFactory.constructCfgProgramFromJsonInfo(oneCfgJson);
             JSONObject dumppedGraph = null;
             switch (outputFormat) {
                 case "ACFG":
-                    dumppedGraph  = cfgFactory.dumpGraph(cfgFunction);
+                    dumppedGraph = cfgFactory.dumpGraph(cfgFunction);
                     break;
                 case "SoN":
                     SoNGraph graph = cfgFactory.constructSeaOfNodes(cfgFunction);
                     dumppedGraph = cfgFactory.dumpGraph(graph);
                     break;
             }
-            binOut.putOpt((String)oneCfgJson.get("start_ea"), dumppedGraph);
-
+            binOut.putOpt((String) oneCfgJson.get("start_ea"), dumppedGraph);
         }
 
         JSONObject binOutWrap = new JSONObject();

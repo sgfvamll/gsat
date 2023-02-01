@@ -208,6 +208,14 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         return cfgOuts;
     }
 
+    public int getPredIdx(CFGBlock pred) {
+        return cfgIns.indexOf(pred);
+    }
+
+    public boolean isReturnBlock() {
+        return cfgOuts.size() == 0;
+    }
+
     public int getOpIdxFromOrder(int opOrder) {
         int numOps = oplist.size();
         for (int i= opOrder; i< numOps; i++) {

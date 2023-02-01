@@ -9,13 +9,20 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 
-public class LengauerTarjan<T extends DAGNode<T>> {
+/// Lengauer-Tarjan algorithm to find dominators
+public class Dominators<T extends DAGNode<T>> {
     List<T> nodes;
-    int[] dfnum;
+    int[] dfnum, idom;
     Map<T, T> parent, semi, ancestor, best;
     List<T> vertex;
     int N = 0;
     static int NOP_DFNUM = Integer.MAX_VALUE;
+
+    public Dominators(List<T> nodes) {
+        this.nodes = nodes;
+        init(nodes.size());
+        idom = getDominators();
+    }
 
     private void init(int graphSize) {
         dfnum = new int[graphSize];
@@ -66,14 +73,12 @@ public class LengauerTarjan<T extends DAGNode<T>> {
         best.put(n, n);
     }
 
-    public int[] getDominators(List<T> nodes) {
-        this.nodes = nodes;
+    private int[] getDominators() {
         Integer graphSize = nodes.size();
         int[] idom = new int[graphSize];
         int[] sameDom = new int[graphSize];
         Map<T, Set<T>> bucket = new HashMap<>();
         Arrays.fill(idom, -1);
-        init(graphSize);
         dfs(null, nodes.get(0)); // the first element is assumed root. 
         for (int i = N - 1; i >= 1; --i) {
             T n = vertex.get(i);
@@ -109,4 +114,7 @@ public class LengauerTarjan<T extends DAGNode<T>> {
         return idom;
     }
 
+    public int[] get() {
+        return idom;
+    }
 }

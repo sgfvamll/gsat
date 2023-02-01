@@ -1,11 +1,14 @@
 package com.gsat.sea;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 import java.util.function.Function;
@@ -17,7 +20,7 @@ import com.gsat.helper.AnalysisHelper;
 import com.gsat.sea.SoNOp.ReturnRegion;
 import com.gsat.sea.analysis.DAGGraph;
 import com.gsat.sea.analysis.DAGNode;
-import com.gsat.sea.analysis.LengauerTarjan;
+import com.gsat.sea.analysis.Dominators;
 import com.gsat.sea.analysis.DominatorFrontiers;
 import com.gsat.utils.ColoredPrint;
 
@@ -35,7 +38,6 @@ import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.listing.VariableStorage;
 import ghidra.program.model.pcode.PcodeOp;
-import ghidra.program.model.pcode.SequenceNumber;
 import ghidra.program.model.pcode.Varnode;
 
 public class CFGFactory {
@@ -202,39 +204,30 @@ public class CFGFactory {
         // AddressSpace regSpace = program.getAddressFactory().getRegisterSpace();
 
         // Step 1. Get dominator frontiers
-        LengauerTarjan<CFGBlock> helperAlg = new LengauerTarjan<>();
-        int[] idom = helperAlg.getDominators(nodes);
+        int[] idom = new Dominators<CFGBlock>(nodes).get();
         DominatorFrontiers<CFGBlock> df = new DominatorFrontiers<>(nodes, idom);
         List<Set<Integer>> domfrontsets = df.get();
         List<List<Integer>> childrenListInDT = df.getChildrenListInDT();
 
-        // Step 2. Get all defsites. 
+        // Step 2. Get all defsites, i.e. each varnode is defined on which basic blocks
         HashMap<Varnode, Set<Integer>> defsites = new HashMap<>();
-        Set<Varnode> defined = new HashSet<>();
         for (CFGBlock n : nodes) {
             for (PcodeOp op : n.getPcodeOps()) {
                 Varnode out = op.getOutput();
-                if (out == null || defined.contains(out))
-                    continue;
-                Set<Integer> defs = defsites.get(out);
-                if (defs == null) {
-                    defs = new HashSet<>();
-                    defsites.put(out, defs);
-                }
-                defs.add(n.id());
-                defined.add(out);
+                if (out == null)
+                    continue; /// no data out
+                defsites.computeIfAbsent(out, k -> new HashSet<>()).add(n.id());
             }
-            defined.clear();
         }
 
-        // Step 3. Inserting PHI nodes
+        // Step 3. Construct regions and insert PHI nodes
         List<HashMap<Varnode, SoNNode>> phiNodes = new ArrayList<>(nodes.size());
         List<SoNNode> regions = new ArrayList<>(nodes.size());
         for (CFGBlock n : nodes) {
             phiNodes.add(new HashMap<>());
             /// Init Region Nodes. 
             PcodeOp last = n.getLastOp();
-            SoNNode controlNode = SoNNode.newRegionFromLastOp(last, n.getSuccessors().size() == 0);
+            SoNNode controlNode = SoNNode.newRegionFromLastOp(last, n.isReturnBlock());
             regions.add(controlNode);
         }
         for (Varnode a : defsites.keySet()) {
@@ -242,11 +235,11 @@ public class CFGFactory {
             while (!worklist.isEmpty()) {
                 Integer n = worklist.pop();
                 for (Integer y : domfrontsets.get(n)) {
-                    HashMap<Varnode, SoNNode> yPhiNodes = phiNodes.get(y);
-                    if (yPhiNodes.containsKey(a))
+                    HashMap<Varnode, SoNNode> blPhiNodes = phiNodes.get(y);
+                    if (blPhiNodes.containsKey(a))
                         continue;
                     int numPre = nodes.get(y).getPredecessors().size();
-                    yPhiNodes.put(a, SoNNode.newPhi(regions.get(y), numPre));
+                    blPhiNodes.put(a, SoNNode.newPhi(regions.get(y), numPre));
                     if (!defsites.get(a).contains(y))
                         worklist.push(y);
                 }
@@ -260,15 +253,10 @@ public class CFGFactory {
         SoNNode end = SoNNode.newEnd();
 
         Function<Varnode, Stack<SoNNode>> getOrNewDefStack = (n) -> {
-            Stack<SoNNode> defStack = state.get(n);
-            if (defStack == null) {
-                defStack = new Stack<>();
-                state.put(n, defStack);
-            }
-            return defStack;
+            return state.computeIfAbsent(n, k -> new Stack<>());
         };
         Function<Varnode, SoNNode> peekOrNewDef = (n) -> {
-            Stack<SoNNode> defStack = getOrNewDefStack.apply(n);
+            Stack<SoNNode> defStack = state.computeIfAbsent(n, k -> new Stack<>());
             if (defStack.size() == 0) {
                 defStack.push(newStorageOrConstant(n));
             }
@@ -293,16 +281,14 @@ public class CFGFactory {
                     int opc = op.getOpcode(), dataUseStart = SoNOp.dataUseStart(opc);
                     if (opc == PcodeOp.COPY) {
                         /// Omit COPY
-                        Varnode input = op.getInput(0);
-                        Varnode out = op.getOutput();
-                        Stack<SoNNode> outDefStack = getOrNewDefStack.apply(out);
-                        outDefStack.push(peekOrNewDef.apply(input));
+                        Varnode input = op.getInput(0), out = op.getOutput();
+                        getOrNewDefStack.apply(out).push(peekOrNewDef.apply(input));
                         continue;
                     }
                     /// Assert that branches/return must be the last op. 
                     assert opIdx == numOps || !SoNOp.isBlockEndControl(opc);
                     /// Link data uses 
-                    SoNNode soNNode = (opIdx == numOps && SoNOp.isBlockEndControl(opc)) ? blRegion
+                    SoNNode soNNode = SoNOp.isBlockEndControl(opc) ? blRegion
                             : new SoNNode(opc, SoNOp.numDataUseOfPcodeOp(op));
                     for (int i = dataUseStart; i < op.getNumInputs(); i++) {
                         Varnode input = op.getInput(i);
@@ -351,22 +337,20 @@ public class CFGFactory {
                     }
                     /// Link effect edges 
                     if (SoNOp.hasEffect(opc)) {
-                        if (lastEffectNode != null) {
+                        if (lastEffectNode != null)
                             soNNode.addUse(lastEffectNode);
-                        }
                         lastEffectNode = soNNode;
                     }
                     /// Push def
                     Varnode out = op.getOutput();
                     if (out != null) { // Every op has at most one output. 
-                        Stack<SoNNode> defStack = getOrNewDefStack.apply(out);
-                        defStack.push(soNNode);
+                        getOrNewDefStack.apply(out).push(soNNode);
                     }
                     for (var use : soNNode.uses) {
                         assert use != null || soNNode.op() instanceof ReturnRegion;
                     }
                 }
-                getReturnValue: if (bl.getSuccessors().size() == 0) {
+                getReturnValue: if (bl.isReturnBlock()) {
                     /// Determine the return value. That is, link data uses of the ReturnRegion node. 
                     boolean first = true;
                     SoNNode soNNode = blRegion;
@@ -414,18 +398,9 @@ public class CFGFactory {
                 }
                 for (CFGBlock succ : bl.getSuccessors()) {
                     /// Process inputs of phi-s
-                    int j = SoNOp.dataUseStart(PcodeOp.MULTIEQUAL);
-                    for (CFGBlock succPred : succ.getPredecessors()) {
-                        if (succPred == bl)
-                            break;
-                        j += 1;
-                    }
+                    int j = SoNOp.dataUseStart(PcodeOp.MULTIEQUAL) + succ.getPredIdx(bl);
                     for (var entry : phiNodes.get(succ.id()).entrySet()) {
-                        Stack<SoNNode> defStack = getOrNewDefStack.apply(entry.getKey());
-                        if (defStack.size() == 0) {
-                            defStack.push(newStorageOrConstant(entry.getKey()));
-                        }
-                        entry.getValue().setUse(j, defStack.peek());
+                        entry.getValue().setUse(j, peekOrNewDef.apply(entry.getKey()));
                     }
                 }
                 for (var childId : childrenListInDT.get(blId)) {

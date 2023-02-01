@@ -246,7 +246,7 @@ public class CFGFunction implements DAGGraph<CFGBlock> {
     public void fixNoReturn() {
         int numReturn = 0;
         for (var entry : blocks.entrySet()) {
-            if (entry.getValue().getSuccessors().size() == 0)
+            if (entry.getValue().isReturnBlock())
                 numReturn += 1;
         }
         if (numReturn > 0)
