@@ -120,6 +120,25 @@ public class CFGFactory {
         }
     }
 
+    /// Replace tail branches with calls. 
+    public void resolveTailCalls(CFGFunction cfgFunction) {
+        for (CFGBlock bl : cfgFunction.getReturnBlocksEndWithBr()) {
+            PcodeOp lastOp = bl.getLastOp();
+            Address target = lastOp.getInput(0).getAddress();
+            if (!target.isLoadedMemoryAddress())
+                continue;
+            var func = program.getFunctionManager().getFunctionAt(target);
+            if (func == null)
+                continue;
+            bl.truncateOpList(bl.numOps() - 1);
+            PcodeOp newCall = new PcodeOp(lastOp.getSeqnum(),
+                    PcodeOp.CALL, lastOp.getInputs(), null);
+            adaptOp(newCall, bl);
+            PcodeOp nullReturn = new PcodeOp(null, PcodeOp.RETURN, new Varnode[0], null);
+            adaptOp(nullReturn, bl);
+        }
+    }
+
     public CFGFunction constructCfgProgramFromJsonInfo(JSONObject cfgInfo) {
         AddressFactory addressFactory = program.getAddressFactory();
         Address fva = addressFactory.getAddress(cfgInfo.getString("start_ea"));
@@ -169,6 +188,7 @@ public class CFGFactory {
             fromBl.linkOut(toBl);
         }
         cfgFunction.fixFlow();
+        resolveTailCalls(cfgFunction);
         return cfgFunction;
     }
 

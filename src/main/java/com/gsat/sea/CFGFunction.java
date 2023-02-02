@@ -137,6 +137,20 @@ public class CFGFunction implements DAGGraph<CFGBlock> {
         }
     }
 
+    /// Get potential blocks that end with a tail call 
+    public Set<CFGBlock> getReturnBlocksEndWithBr() {
+        Set<CFGBlock> blEndWithBr2Func = new HashSet<>();
+        for (CFGBlock bl: blocks.values()) {
+            if (!bl.isReturnBlock()) 
+                continue;
+            PcodeOp last = bl.getLastOp();
+            if (last == null || last.getOpcode() != PcodeOp.BRANCH) 
+                continue;
+            blEndWithBr2Func.add(bl);
+        }
+        return blEndWithBr2Func;
+    }
+
     /// TODO Try ensuring edges order and resolving in-block branches. 
     ///      And merge fixReturnBlockHasSucc. 
     public void fixFlow() {
