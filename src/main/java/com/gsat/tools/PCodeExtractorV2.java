@@ -5,7 +5,7 @@ import org.apache.commons.cli.Option;
 import org.json.*;
 
 import com.gsat.helper.AnalysisHelper;
-import com.gsat.sea.CFGFactory;
+import com.gsat.sea.GraphFactory;
 import com.gsat.sea.CFGFunction;
 import com.gsat.sea.SoNGraph;
 import com.gsat.utils.ColoredPrint;
@@ -88,7 +88,7 @@ public class PCodeExtractorV2 extends BaseTool {
             AnalysisHelper.rebaseProgram(program, program.getImageBase().add(-offset));
         }
 
-        CFGFactory cfgFactory = new CFGFactory(program);
+        GraphFactory cfgFactory = new GraphFactory(program);
         JSONObject binOut = new JSONObject();
         for (var oneCfgInfo : cfgInfos) {
             JSONObject oneCfgJson = (JSONObject) oneCfgInfo;

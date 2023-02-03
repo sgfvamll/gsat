@@ -31,6 +31,24 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         }
     }
 
+    public static class OpSite {
+        CFGBlock bl;
+        int opIdx;
+
+        public OpSite(CFGBlock bl, int opIdx) {
+            this.bl = bl;
+            this.opIdx = opIdx;
+        }
+
+        public CFGBlock getBlock() {
+            return bl;
+        }
+
+        public int getOpIdx() {
+            return opIdx;
+        }
+    }
+
     CFGBlock(Address nodeStartEa, int speculativeNumInsts) {
         address = nodeStartEa;
         oplist = new ArrayList<>(speculativeNumInsts);
@@ -126,12 +144,15 @@ public class CFGBlock implements DAGNode<CFGBlock> {
 
     /// Warning, first op seqnum may not be the least seqnum 
     /// Considering delay slots. 
-    public SequenceNumber getFirstOpSeqNum() {
-        if (oplist.isEmpty()) {
-            return new SequenceNumber(address, 0);
-        } else {
-            return oplist.get(0).getSeqnum();
+    public SequenceNumber getStartSeqNum() {
+        SequenceNumber seqnum = null;
+        if (!oplist.isEmpty()) {
+            seqnum = oplist.get(0).getSeqnum();
         }
+        if (seqnum == null && address != null) 
+            seqnum = new SequenceNumber(address, 0);
+        assert seqnum != null;
+        return seqnum;
     }
 
     /// Warning, first op seqnum may not be the least seqnum 
@@ -226,6 +247,22 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         return -1;
     }
 
+    public int getOpIdxFromSeqnum(SequenceNumber seqnum) {
+        int numOps = oplist.size(), opIdx = -1;
+        for (int i = 0; i < numOps; i++) {
+            SequenceNumber opSeqnum = oplist.get(i).getSeqnum();
+            if (opSeqnum != null && opSeqnum.equals(seqnum)) {
+                opIdx = i;
+                break;
+            }
+        }
+        return opIdx;
+    }
+
+    public int getOpIdxFromAddress(Address splitAddr) {
+        return getOpIdxFromSeqnum(new SequenceNumber(splitAddr, 0));
+    }
+
     public CFGBlock splitAt(int opIdx) {
         int numOps = oplist.size();
         assert opIdx > 0 && opIdx < numOps;
@@ -244,24 +281,6 @@ public class CFGBlock implements DAGNode<CFGBlock> {
             linkOut(newBl);
         }
         return newBl;
-    }
-
-    public CFGBlock splitAt(SequenceNumber seqnum) {
-        int numOps = oplist.size(), opIdx = -1;
-        for (int i = 0; i < numOps; i++) {
-            SequenceNumber opSeqnum = oplist.get(i).getSeqnum();
-            if (opSeqnum != null && opSeqnum.equals(seqnum)) {
-                opIdx = i;
-                break;
-            }
-        }
-        if (opIdx == -1 || opIdx == 0)
-            return null;
-        return splitAt(opIdx);
-    }
-
-    public CFGBlock splitAt(Address splitAddr) {
-        return splitAt(new SequenceNumber(splitAddr, 0));
     }
 
     public void unlink() {

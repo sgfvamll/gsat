@@ -12,6 +12,10 @@ public class SoNOp {
         return opc == PcodeOp.CALL || opc == PcodeOp.CALLIND || opc == PcodeOp.CALLOTHER;
     }
 
+    public static boolean isBranch(int opc) {
+        return opc == PcodeOp.BRANCH || opc == PcodeOp.CBRANCH || opc == PcodeOp.BRANCHIND;
+    }
+
     public static boolean hasEffect(int opc) {
         return isCall(opc) || opc == PcodeOp.STORE;
     }
@@ -21,9 +25,8 @@ public class SoNOp {
     }
 
     /// Check if this opcode ends a basic block
-    public static boolean isBlockEndControl(int opc) {
-        return (opc == PcodeOp.BRANCH) || (opc == PcodeOp.CBRANCH)
-                || (opc == PcodeOp.BRANCHIND) || (opc == PcodeOp.RETURN);
+    public static boolean endsBlock(int opc) {
+        return isBranch(opc) || opc == PcodeOp.RETURN;
     }
 
     public static int dataUseStart(int opc) {

@@ -83,7 +83,7 @@ public class SoNNode implements DAGNode<SoNNode> {
     public static SoNNode newRegionFromLastOp(PcodeOp last, boolean isReturnBlock) {
         SoNNode controlNode = null;
         if (isReturnBlock)
-            return SoNNode.newReturnRegion(1);
+            return SoNNode.newReturnRegion(0);
         if (last == null)
             controlNode = SoNNode.newRegion(0);
         else {
@@ -97,7 +97,6 @@ public class SoNNode implements DAGNode<SoNNode> {
                     break;
                 case PcodeOp.RETURN:
                     assert false;
-                    controlNode = SoNNode.newReturnRegion(1);
                     break;
                 default:
                     controlNode = SoNNode.newRegion(0);
