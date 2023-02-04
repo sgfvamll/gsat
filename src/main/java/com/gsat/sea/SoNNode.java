@@ -30,10 +30,23 @@ public class SoNNode implements DAGNode<SoNNode> {
             uses.add(null);
     }
 
-    SoNNode(int opc, int initUses) {
+    private SoNNode(int opc, int initUses) {
         // TODO share baseop objects
         this(new BaseOp(opc), initUses);
         assert opc != PcodeOp.MULTIEQUAL;
+    }
+
+    public static SoNNode newSoNNode(PcodeOp op) {
+        int opc = op.getOpcode();
+        SoNNode result;
+        switch (opc) {
+            case PcodeOp.SUBPIECE:
+                result = newProject(op.getOutput().getSize());
+                break;
+            default:
+                result = new SoNNode(opc, SoNOp.numDataUseOfPcodeOp(op));
+        }
+        return result;
     }
 
     public int id() {
@@ -130,6 +143,15 @@ public class SoNNode implements DAGNode<SoNNode> {
         SoNNode phi = new SoNNode(new Phi(), 1 + numDataUses);
         phi.setUse(0, region);
         return phi;
+    }
+
+    public static SoNNode newProject(int outSize) {
+        BaseOp op = new Project(outSize);
+        return new SoNNode(op, 2);
+    }
+
+    public static SoNNode newPiece(int numDataUses) {
+        return new SoNNode(PcodeOp.PIECE, numDataUses);
     }
 
     public static SoNNode newMemorySpace(long spaceId) {

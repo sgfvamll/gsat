@@ -84,7 +84,7 @@ public class GraphFactory {
     /// Store is the output of STORE op, representing a memory snapshot. 
     public Varnode newStore(int spaceId) {
         Address addr = storeSpace.getAddress(spaceId);
-        return new Varnode(addr, 4);
+        return new Varnode(addr, 0);
     }
 
     public Varnode newConstant(long value) {

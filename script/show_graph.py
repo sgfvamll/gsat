@@ -44,12 +44,20 @@ if __name__ == "__main__":
         graph = create_graph(nodes, edges)
         print(fva, graph)
         labels = dict([
-            (int(nid), nid+' '+mnem_data['bb_mnems'][0]) 
-            for nid, mnem_data in func_data['basic_blocks'].items()
+            (int(nid), nid+' '+mnem_data['node_mnems'][0]) 
+            for nid, mnem_data in func_data['nodes_verbs'].items()
         ])
         seed = random.randint(0, 10000)
         print(seed)
-        pos = nx.spring_layout(graph, k=20, iterations=1000, seed=seed)  # positions for all nodes
+        # pos = nx.spring_layout(graph, k=20, iterations=1000, seed=seed)  # positions for all nodes
+        ## Default not-connected weights is 1e+6, and edge weight is 1. 
+        ## It makes meaningless to put nodes not connected apart. 
+        edge_weight = lambda f, t, a : 1.5e+4
+        pos = nx.kamada_kawai_layout(graph, weight = edge_weight)
+        # pos = nx.shell_layout(graph)
+        # pos_list = [nx.circular_layout(graph), nx.random_layout(graph), nx.shell_layout(graph),
+        #     nx.spring_layout(graph), nx.spectral_layout(graph), nx.kamada_kawai_layout(graph)]    
+        # for pos in pos_list:
         plt.plot()
         nx.draw(graph, pos, labels=labels, node_size = 800)
         plt.show()  

@@ -171,4 +171,12 @@ public class SoNOp {
         }
     }
 
+    public static class Project extends BaseOp {
+        int outSize;
+        Project(int outSize) {
+            super(PcodeOp.SUBPIECE);
+            this.outSize = outSize;
+        }
+    }
+
 }
