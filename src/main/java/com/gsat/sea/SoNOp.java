@@ -138,10 +138,6 @@ public class SoNOp {
     }
 
     public static class Region extends BaseOp {
-        Region() {
-            super(-9);
-        }
-
         protected Region(int opc) {
             super(opc);
         }
@@ -149,6 +145,12 @@ public class SoNOp {
 
     public static class BrRegion extends Region {
         BrRegion() {
+            super(PcodeOp.BRANCH);
+        }
+    }
+
+    public static class CBrRegion extends Region {
+        CBrRegion() {
             super(PcodeOp.CBRANCH);
         }
     }

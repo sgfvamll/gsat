@@ -1,10 +1,26 @@
 package com.gsat.sea;
 
+import java.util.Comparator;
+
 import ghidra.program.model.address.Address;
+import ghidra.program.model.pcode.Varnode;
 
 public class AddressInterval implements Comparable<AddressInterval> {
     private Address minAddress;
     private long size;
+
+    public static class VarnodeComparator implements Comparator<Varnode> {
+        public int compare(Varnode o1, Varnode o2) {
+            int val = o1.getAddress().compareTo(o2.getAddress());
+            if (val != 0)
+                return val;
+            return Integer.compare(o1.getSize(), o2.getSize());
+        }
+    }
+
+    public static AddressInterval fromVarnode(Varnode varnode) {
+        return new AddressInterval(varnode.getAddress(), varnode.getSize());
+    }
 
     AddressInterval(Address start, long length) {
         this.minAddress = start;
@@ -23,7 +39,7 @@ public class AddressInterval implements Comparable<AddressInterval> {
     public AddressInterval removeFromStart(long n) {
         if (n >= size)
             return null;
-        minAddress.addWrap(n);
+        minAddress = minAddress.addWrap(n);
         size -= n;
         return this;
     }

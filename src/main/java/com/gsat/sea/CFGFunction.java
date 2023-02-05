@@ -2,9 +2,8 @@ package com.gsat.sea;
 
 import java.util.List;
 import java.util.Set;
-import java.util.Map;
+import java.util.TreeMap;
 import java.util.HashSet;
-import java.util.HashMap;
 
 import com.gsat.sea.analysis.DAGGraph;
 
@@ -39,8 +38,8 @@ public class CFGFunction implements DAGGraph<CFGBlock> {
         return blocks.size();
     }
 
-    public Map<Varnode, Set<Integer>> generateDefsites() {
-        HashMap<Varnode, Set<Integer>> defsites = new HashMap<>();
+    public TreeMap<Varnode, Set<Integer>> generateDefsites() {
+        TreeMap<Varnode, Set<Integer>> defsites = new TreeMap<>(new AddressInterval.VarnodeComparator());
         for (CFGBlock n : blocks) {
             for (PcodeOp op : n.getPcodeOps()) {
                 Varnode out = op.getOutput();

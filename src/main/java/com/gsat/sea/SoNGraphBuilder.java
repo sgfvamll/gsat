@@ -8,83 +8,85 @@ import com.gsat.sea.analysis.Dominators;
 
 import generic.stl.Pair;
 import ghidra.program.model.address.Address;
-import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 
 public class SoNGraphBuilder {
-    DefState state = new DefState();
+    RevertibleDefState state = new RevertibleDefState();
     Deque<CFGBlock> worklist = new ArrayDeque<>();
     Set<CFGBlock> processed = new HashSet<>();
     SoNNode end = SoNNode.newEnd();
     List<SoNNode> regions;
-    List<HashMap<Varnode, SoNNode>> phiNodes;
+    List<DefState> phiDefs;
 
     GraphFactory graphFactory;
     CFGFunction cfgFunction;
     List<CFGBlock> nodes;
 
-    public class DefState {
+    public static abstract class AbstractDefState<V> {
         /// Defs are orginized as no intersecting intervals (except 'defs' for constants, 
         ///     they are allowed to have intersrctions). 
-        /// Every interval has its def stack which records nodes that define values on this interval. 
+        /// Every interval has its def (stack) which records nodes that define values on this interval. 
         /// A use may be pieced by several defs. 
         /// When new def overlap with old ones, old ones are cut. 
-        TreeMap<AddressInterval, Stack<SoNNode>> state;
-        Stack<Stack<Pair<AddressInterval, Stack<SoNNode>>>> actions;
+        protected TreeMap<AddressInterval, V> state;
 
-        DefState() {
-            state = new TreeMap<AddressInterval, Stack<SoNNode>>();
-            actions = new Stack<>();
-            commit();
+        protected SoNNode constructAndPut(AddressInterval interval) {
+            SoNNode node = SoNNode.newStoreOrConst(interval);
+            return putOnNewKey(interval, node, true);
         }
 
-        private static AddressInterval addrIntervalFromVarnode(Varnode varnode) {
-            return new AddressInterval(varnode.getAddress(), varnode.getSize());
+        protected SoNNode putOnNewKey(AddressInterval interval, SoNNode node) {
+            return putOnNewKey(interval, node, false);
         }
 
-        private SoNNode putNoCheck(AddressInterval interval, SoNNode node) {
-            assert interval.getLength() < 0x100;
-            state.computeIfAbsent(interval, (k) -> new Stack<>()).push(node);
-            return node;
-        }
-
-        private SoNNode constructAndPut(AddressInterval interval) {
-            SoNNode node = newStorageOrConstant(interval);
-            return putNoCheck(interval, node);
-        }
-
-        public void commit() {
-            actions.push(new Stack<>());
-        }
-
-        public void revert() {
-            assert actions.pop().empty();
-            var actionStack = actions.peek();
-            while (!actionStack.empty()) {
-                var action = actionStack.pop();
-                if (action.second == null) {
-                    Stack<SoNNode> defStack = state.get(action.first);
-                    defStack.pop();
-                    if (defStack.empty())
-                        state.remove(action.first);
-                } else {
-                    state.put(action.first, action.second);
-                }
+        public boolean keyCovered(AddressInterval interval) {
+            AddressInterval floorKey = state.floorKey(interval);
+            if (floorKey != null && floorKey.equals(interval))
+                return true;
+            boolean isIntersecting = floorKey != null && interval.intersect(floorKey) != null;
+            AddressInterval iterStart = isIntersecting ? floorKey : interval;
+            boolean result = false;
+            for (AddressInterval entry : state.tailMap(iterStart).keySet()) {
+                AddressInterval[] remainings = interval.substract(entry);
+                if (remainings.length == 0)
+                    result = true;
+                if (remainings.length != 1 || interval.equals(remainings[0]))
+                    break;
+                interval = remainings[0];
             }
+            return result;
         }
+
+        public Set<Map.Entry<AddressInterval, V>> entrySet() {
+            return state.entrySet();
+        }
+
+        protected abstract SoNNode putOnNewKey(AddressInterval interval, SoNNode node, boolean definedOnStart);
+
+        protected abstract V remove(AddressInterval interval);
+
+        protected abstract SoNNode eput(Map.Entry<AddressInterval, V> entry, SoNNode node);
+
+        protected abstract SoNNode eget(Map.Entry<AddressInterval, V> entry);
 
         public SoNNode peekOrNew(Varnode varnode) {
+            return peekOrNew(AddressInterval.fromVarnode(varnode));
+        }
+
+        public SoNNode peekOrNew(AddressInterval varnode) {
             SoNNode node = peek(varnode);
-            AddressInterval requiredRange = addrIntervalFromVarnode(varnode);
-            return node == null ? constructAndPut(requiredRange) : node;
+            return node == null ? constructAndPut(varnode) : node;
         }
 
         public SoNNode peek(Varnode varnode) {
-            AddressInterval requiredRange = addrIntervalFromVarnode(varnode);
+            return peek(AddressInterval.fromVarnode(varnode));
+        }
+
+        public SoNNode peek(AddressInterval requiredRange) {
             var sEntry = state.floorEntry(requiredRange);
             if (sEntry != null && sEntry.getKey().equals(requiredRange)) {
-                return sEntry.getValue().peek(); /// defStack is ensured non-empty
+                return eget(sEntry); /// defStack is ensured non-empty
             }
             if (requiredRange.getMinAddress().isConstantAddress()) {
                 return constructAndPut(requiredRange);
@@ -107,14 +109,14 @@ public class SoNGraphBuilder {
                     int sizeUndefined = (int) (intersectedMin.getOffset()
                             - currentMinAddr.getOffset());
                     AddressInterval undefined = new AddressInterval(currentMinAddr, sizeUndefined);
-                    SoNNode newStorage = newStorageOrConstant(undefined);
+                    SoNNode newStorage = SoNNode.newStoreOrConst(undefined);
                     newDefs.add(new Pair<>(undefined, newStorage));
                     subPieces.add(newStorage);
                     requiredRange = requiredRange.removeFromStart(sizeUndefined);
                 }
                 long intersectedLen = intersected.getLength();
                 long offset = intersectedMin.subtract(entry.getKey().getMinAddress());
-                SoNNode project, input = entry.getValue().peek();
+                SoNNode project, input = eget(entry);
                 if (intersectedLen != entry.getKey().getLength()) {
                     project = SoNNode.newProject((int) intersectedLen);
                     project.setUse(0, input);
@@ -129,7 +131,7 @@ public class SoNGraphBuilder {
             if (noDefOverlapped)
                 return null;
             for (var pair : newDefs) {
-                putNoCheck(pair.first, pair.second);
+                putOnNewKey(pair.first, pair.second, true);
             }
             if (requiredRange != null) {
                 SoNNode newStorage = constructAndPut(requiredRange);
@@ -150,13 +152,16 @@ public class SoNGraphBuilder {
         }
 
         public SoNNode put(Varnode varnode, SoNNode node) {
-            AddressInterval requiredRange = addrIntervalFromVarnode(varnode);
+            return put(AddressInterval.fromVarnode(varnode), node);
+        }
+
+        public SoNNode put(AddressInterval requiredRange, SoNNode node) {
             var sEntry = state.floorEntry(requiredRange);
             if (sEntry != null && sEntry.getKey().equals(requiredRange)) {
-                return sEntry.getValue().push(node);
+                return eput(sEntry, node);
             }
             if (requiredRange.getMinAddress().isConstantAddress()) {
-                return constructAndPut(requiredRange);
+                return putOnNewKey(requiredRange, node);
             }
             /// Find all defined ranges that are covered / partly covered by this new define. And record that. 
             boolean isIntersecting = sEntry != null && requiredRange.intersect(sEntry.getKey()) != null;
@@ -175,53 +180,108 @@ public class SoNGraphBuilder {
                     long subPieceOffset = remaining.getMinAddress().subtract(eKey.getMinAddress());
                     int subPieceSize = (int) remaining.getLength();
                     SoNNode subPiece = SoNNode.newProject(subPieceSize);
-                    subPiece.setUse(0, entry.getValue().peek());
+                    subPiece.setUse(0, eget(entry));
                     subPiece.setUse(1, SoNNode.newConstant(subPieceOffset, 4));
                     newView.add(new Pair<>(remaining, subPiece));
                 }
             }
             /// Remove all defs that overlap with this new def
             for (AddressInterval interval : tobeRemoved) {
-                actions.peek().push(new Pair<>(interval, state.get(interval)));
-                state.remove(interval);
+                remove(interval);
             }
             /// Insert back remaining defs (not covered part of the removed defs). 
             for (var pair : newView) {
-                actions.peek().push(new Pair<>(pair.first, null));
-                putNoCheck(pair.first, pair.second);
+                putOnNewKey(pair.first, pair.second);
             }
             /// Finally, insert the new def. 
-            actions.peek().push(new Pair<>(requiredRange, null));
-            return putNoCheck(requiredRange, node);
+            return putOnNewKey(requiredRange, node);
         }
+
+    }
+
+    public static class DefState extends AbstractDefState<SoNNode> {
+        public DefState() {
+            state = new TreeMap<>();
+        }
+
+        protected SoNNode putOnNewKey(AddressInterval interval, SoNNode node, boolean definedOnStart) {
+            assert !state.containsKey(interval);
+            return state.put(interval, node);
+        }
+
+        protected SoNNode eput(Map.Entry<AddressInterval, SoNNode> entry, SoNNode node) {
+            return entry.setValue(node);
+        }
+
+        protected SoNNode eget(Map.Entry<AddressInterval, SoNNode> entry) {
+            return entry.getValue();
+        }
+
+        protected SoNNode remove(AddressInterval interval) {
+            return state.remove(interval);
+        }
+    }
+
+    public static class RevertibleDefState extends AbstractDefState<Stack<SoNNode>> {
+        Stack<Stack<Pair<AddressInterval, Stack<SoNNode>>>> actions;
+
+        RevertibleDefState() {
+            state = new TreeMap<>();
+            actions = new Stack<>();
+            commit();
+        }
+
+        protected SoNNode putOnNewKey(AddressInterval interval, SoNNode node, boolean definedOnStart) {
+            assert !state.containsKey(interval);
+            if (!definedOnStart)
+                recordLog(interval, null);
+            return state.computeIfAbsent(interval, (k) -> new Stack<>()).push(node);
+        }
+
+        protected SoNNode eput(Map.Entry<AddressInterval, Stack<SoNNode>> entry, SoNNode node) {
+            recordLog(entry.getKey(), null);
+            return entry.getValue().push(node);
+        }
+
+        protected SoNNode eget(Map.Entry<AddressInterval, Stack<SoNNode>> entry) {
+            return entry.getValue().peek();
+        }
+
+        protected Stack<SoNNode> remove(AddressInterval interval) {
+            recordLog(interval, state.get(interval));
+            return state.remove(interval);
+        }
+
+        public void commit() {
+            actions.push(new Stack<>());
+        }
+
+        public void revert() {
+            assert actions.pop().empty();
+            var actionStack = actions.peek();
+            while (!actionStack.empty()) {
+                var action = actionStack.pop();
+                if (action.second == null) {
+                    Stack<SoNNode> defStack = state.get(action.first);
+                    defStack.pop();
+                    if (defStack.empty())
+                        state.remove(action.first);
+                } else {
+                    state.put(action.first, action.second);
+                }
+            }
+        }
+
+        public void recordLog(AddressInterval interval, Stack<SoNNode> value) {
+            actions.peek().push(new Pair<>(interval, value));
+        }
+
     }
 
     SoNGraphBuilder(CFGFunction cfgFunction, GraphFactory graphFactory) {
         this.nodes = cfgFunction.getBlocks();
         this.cfgFunction = cfgFunction;
         this.graphFactory = graphFactory;
-    }
-
-    public SoNNode newStorageOrConstant(AddressSpace space, long offset, int size) {
-        if (space == graphFactory.getStoreSpace()) {
-            return SoNNode.newMemorySpace(offset);
-        } else if (space.isConstantSpace()) {
-            return SoNNode.newConstant(offset, size);
-        } else if (space.isRegisterSpace()) {
-            return SoNNode.newRegisterStore(offset, size);
-        } else if (space.isMemorySpace()) {
-            return SoNNode.newStackStore(offset, size);
-        }
-        return SoNNode.newOtherStore(space.getSpaceID(), offset, size);
-    }
-
-    public SoNNode newStorageOrConstant(Varnode varnode) {
-        return newStorageOrConstant(varnode.getAddress().getAddressSpace(), varnode.getOffset(), varnode.getSize());
-    }
-
-    public SoNNode newStorageOrConstant(AddressInterval interval) {
-        return newStorageOrConstant(interval.getMinAddress().getAddressSpace(), interval.getMinAddress().getOffset(),
-                (int) interval.getLength());
     }
 
     public SoNGraph build() {
@@ -240,32 +300,34 @@ public class SoNGraphBuilder {
 
     private void buildRegions() {
         regions = new ArrayList<>(nodes.size());
-        phiNodes = new ArrayList<HashMap<Varnode, SoNNode>>(nodes.size());
+        phiDefs = new ArrayList<DefState>(nodes.size());
         for (CFGBlock n : nodes) {
-            phiNodes.add(new HashMap<>());
+            phiDefs.add(new DefState());
             /// Init Region Nodes. 
             PcodeOp last = n.getLastOp();
-            SoNNode controlNode = SoNNode.newRegionFromLastOp(last, n.isReturnBlock());
+            SoNNode controlNode = SoNNode.newRegion(last, n.isReturnBlock());
             regions.add(controlNode);
         }
     }
 
     private void insertPhiNodes(List<Set<Integer>> domfrontsets) {
         /// Get all defsites, i.e. each varnode is defined on which basic blocks
-        Map<Varnode, Set<Integer>> defsites = cfgFunction.generateDefsites();
+        /// It's important to perserve order (make sure Varnode(A, size=s1) is before Varnode(A, size=s2) where s1 < s2)
+        TreeMap<Varnode, Set<Integer>> defsites = cfgFunction.generateDefsites();
         /// Inserting phi nodes 
-        for (Varnode a : defsites.keySet()) {
-            Deque<Integer> worklist = new ArrayDeque<>(defsites.get(a));
+        for (var ndefs : defsites.entrySet()) {
+            AddressInterval interval = AddressInterval.fromVarnode(ndefs.getKey());
+            Deque<Integer> worklist = new ArrayDeque<>(ndefs.getValue());
             while (!worklist.isEmpty()) {
                 Integer n = worklist.pop();
-                for (Integer y : domfrontsets.get(n)) {
-                    Map<Varnode, SoNNode> blPhiNodes = phiNodes.get(y);
-                    if (blPhiNodes.containsKey(a))
+                for (Integer blId : domfrontsets.get(n)) {
+                    DefState blPhiDefs = phiDefs.get(blId);
+                    if (blPhiDefs.keyCovered(interval))
                         continue;
-                    int numPre = nodes.get(y).getPredecessors().size();
-                    blPhiNodes.put(a, SoNNode.newPhi(regions.get(y), numPre));
-                    if (!defsites.get(a).contains(y))
-                        worklist.push(y);
+                    int numPre = nodes.get(blId).getPredecessors().size();
+                    blPhiDefs.put(interval, SoNNode.newPhi(regions.get(blId), numPre));
+                    if (!ndefs.getValue().contains(blId))
+                        worklist.push(blId);
                 }
             }
         }
@@ -294,7 +356,7 @@ public class SoNGraphBuilder {
     private void buildOneBlock(CFGBlock bl) {
         int blId = bl.id();
         SoNNode blRegion = regions.get(blId);
-        for (var entry : phiNodes.get(blId).entrySet()) {
+        for (var entry : phiDefs.get(blId).entrySet()) {
             state.put(entry.getKey(), entry.getValue()); // Add phi defs
         }
         int opIdx = 0, numOps = bl.numOps();
@@ -311,7 +373,7 @@ public class SoNGraphBuilder {
             /// Assert that branches/return must be the last op. 
             assert opIdx == numOps || !SoNOp.endsBlock(opc);
             /// Link data uses from opcode inputs
-            SoNNode soNNode = SoNOp.endsBlock(opc) ? blRegion : SoNNode.newSoNNode(op);
+            SoNNode soNNode = SoNOp.endsBlock(opc) ? blRegion : SoNNode.newBaseSoNNodeFromOp(op);
             for (int i = dataUseStart; i < op.getNumInputs(); i++) {
                 Varnode input = op.getInput(i);
                 soNNode.setUse(i - dataUseStart, state.peekOrNew(input));
@@ -359,7 +421,7 @@ public class SoNGraphBuilder {
         /// Link succ's phi nodes
         for (CFGBlock succ : bl.getSuccessors()) {
             int j = SoNOp.dataUseStart(PcodeOp.MULTIEQUAL) + succ.getPredIdx(bl);
-            for (var entry : phiNodes.get(succ.id()).entrySet()) {
+            for (var entry : phiDefs.get(succ.id()).entrySet()) {
                 entry.getValue().setUse(j, state.peekOrNew(entry.getKey()));
             }
         }
@@ -430,7 +492,7 @@ public class SoNGraphBuilder {
         if (!returnValues.isEmpty())
             return returnValues;
         /// 3. Void return
-        returnValues.add(newStorageOrConstant(graphFactory.newConstant(0)));
+        returnValues.add(SoNNode.newStoreOrConst(graphFactory.newConstant(0)));
         return returnValues;
     }
 

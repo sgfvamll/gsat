@@ -39,7 +39,7 @@ if __name__ == "__main__":
         edges = func_data['edges']
         if len(nodes) < min_nodes:
             min_nodes = len(nodes)
-        if len(nodes) > 100:
+        if len(nodes) > 30:
             continue
         graph = create_graph(nodes, edges)
         print(fva, graph)
@@ -61,4 +61,4 @@ if __name__ == "__main__":
         plt.plot()
         nx.draw(graph, pos, labels=labels, node_size = 800)
         plt.show()  
-    print(min_nodes)
+    print("min nodes on a graph:", min_nodes)

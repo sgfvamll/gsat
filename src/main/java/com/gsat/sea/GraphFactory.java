@@ -31,7 +31,7 @@ import ghidra.program.model.pcode.Varnode;
 
 public class GraphFactory {
     Program program;
-    AddressSpace storeSpace = new GenericAddressSpace(
+    static AddressSpace storeSpace = new GenericAddressSpace(
             "STORE", 16, AddressSpace.TYPE_UNIQUE, 0x328);
     AddressSpace newUniqueSpace = new GenericAddressSpace(
             "NewUnique", 16, AddressSpace.TYPE_UNIQUE, 0x329);
@@ -67,7 +67,7 @@ public class GraphFactory {
         return program.getFunctionManager().getFunctionAt(address);
     }
 
-    public AddressSpace getStoreSpace() {
+    public static AddressSpace getStoreSpace() {
         return storeSpace;
     }
 

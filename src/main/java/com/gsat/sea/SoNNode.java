@@ -36,19 +36,6 @@ public class SoNNode implements DAGNode<SoNNode> {
         assert opc != PcodeOp.MULTIEQUAL;
     }
 
-    public static SoNNode newSoNNode(PcodeOp op) {
-        int opc = op.getOpcode();
-        SoNNode result;
-        switch (opc) {
-            case PcodeOp.SUBPIECE:
-                result = newProject(op.getOutput().getSize());
-                break;
-            default:
-                result = new SoNNode(opc, SoNOp.numDataUseOfPcodeOp(op));
-        }
-        return result;
-    }
-
     public int id() {
         return id;
     }
@@ -93,17 +80,54 @@ public class SoNNode implements DAGNode<SoNNode> {
         uses.add(inp);
     }
 
-    public static SoNNode newRegionFromLastOp(PcodeOp last, boolean isReturnBlock) {
+    public static SoNNode newBaseSoNNodeFromOp(PcodeOp op) {
+        int opc = op.getOpcode();
+        SoNNode result;
+        switch (opc) {
+            case PcodeOp.SUBPIECE:
+                result = newProject(op.getOutput().getSize());
+                break;
+            default:
+                result = new SoNNode(opc, SoNOp.numDataUseOfPcodeOp(op));
+        }
+        return result;
+    }
+
+    public static SoNNode newStoreOrConst(Varnode varnode) {
+        return newStoreOrConst(varnode.getAddress().getAddressSpace(), varnode.getOffset(), varnode.getSize());
+    }
+
+    public static SoNNode newStoreOrConst(AddressInterval interval) {
+        return newStoreOrConst(interval.getMinAddress().getAddressSpace(),
+                interval.getMinAddress().getOffset(), (int) interval.getLength());
+    }
+
+    public static SoNNode newStoreOrConst(AddressSpace space, long offset, int size) {
+        if (space == GraphFactory.getStoreSpace()) {
+            return SoNNode.newMemorySpace(offset); // represents the entire memory space 
+        } else if (space.isConstantSpace()) {
+            return SoNNode.newConstant(offset, size);
+        } else if (space.isRegisterSpace()) {
+            return SoNNode.newRegisterStore(offset, size); // one register store
+        } else if (space.isMemorySpace()) {
+            return SoNNode.newStackStore(offset, size); // one memory store
+        } else if (space.isStackSpace()) {
+            return SoNNode.newStackStore(offset, size); // one stack store
+        }
+        return SoNNode.newOtherStore(space.getSpaceID(), offset, size);
+    }
+
+    public static SoNNode newRegion(PcodeOp last, boolean isReturnBlock) {
         SoNNode controlNode = null;
         if (isReturnBlock)
             return SoNNode.newReturnRegion(0);
         if (last == null)
-            controlNode = SoNNode.newRegion(0);
+            controlNode = SoNNode.newBrRegion(0);
         else {
             int opc = last.getOpcode();
             switch (opc) {
                 case PcodeOp.CBRANCH:
-                    controlNode = SoNNode.newBrRegion(1);
+                    controlNode = SoNNode.newCBrRegion(1);
                     break;
                 case PcodeOp.BRANCHIND:
                     controlNode = SoNNode.newBrIndRegion(1);
@@ -112,7 +136,7 @@ public class SoNNode implements DAGNode<SoNNode> {
                     assert false;
                     break;
                 default:
-                    controlNode = SoNNode.newRegion(0);
+                    controlNode = SoNNode.newBrRegion(0);
                     break;
             }
         }
@@ -123,12 +147,12 @@ public class SoNNode implements DAGNode<SoNNode> {
         return new SoNNode(new End(), 0);
     }
 
-    public static SoNNode newRegion(int numUses) {
-        return new SoNNode(new Region(), numUses);
-    }
-
     public static SoNNode newBrRegion(int numUses) {
         return new SoNNode(new BrRegion(), numUses);
+    }
+
+    public static SoNNode newCBrRegion(int numUses) {
+        return new SoNNode(new CBrRegion(), numUses);
     }
 
     public static SoNNode newBrIndRegion(int numUses) {
