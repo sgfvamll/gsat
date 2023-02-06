@@ -33,9 +33,9 @@ import ghidra.program.model.pcode.Varnode;
 public class GraphFactory {
     Program program;
     static AddressSpace storeSpace = new GenericAddressSpace(
-            "STORE", 16, AddressSpace.TYPE_UNIQUE, 0x328);
+            "STORE", 32, AddressSpace.TYPE_UNIQUE, 0x328);
     AddressSpace newUniqueSpace = new GenericAddressSpace(
-            "NewUnique", 16, AddressSpace.TYPE_UNIQUE, 0x329);
+            "NewUnique", 32, AddressSpace.TYPE_UNIQUE, 0x329);
     AddressSpace constantSpace;
     long uniqueOffset = 0;
     Varnode[] possibleReturnVarnodes;
@@ -58,6 +58,10 @@ public class GraphFactory {
         Varnode[] returnAddresses = defaultCC.getReturnAddress();
         assert returnAddresses.length == 1;
         defaultReturnAddress = returnAddresses[0];
+    }
+
+    public void clearState() {
+        uniqueOffset = 0;
     }
 
     public Varnode[] getPossibleReturnVarnodes() {
@@ -177,8 +181,9 @@ public class GraphFactory {
         while (!worklist.isEmpty()) {
             T node = worklist.pop();
             nodes.add(node.id());
+            int slot = 0;
             for (T succ : node.getSuccessors()) {
-                edges.add(new Integer[] { node.id(), succ.id() });
+                edges.add(new Integer[] { node.id(), succ.id(), node.getEdgeType(slot++) });
                 if (!nodeSet.contains(succ)) {
                     worklist.push(succ);
                     nodeSet.add(succ);

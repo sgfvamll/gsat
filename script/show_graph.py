@@ -28,6 +28,13 @@ def create_graph(nodes, edges):
 
     return G
 
+# '-', '--', '-.', ':'
+EDGE_STYLE_MAP = {
+    1: "-", 
+    2: "--", 
+    3: ":", 
+}
+
 if __name__ == "__main__":
     graph_fp = sys.argv[1]
     with open(graph_fp, "r") as f:
@@ -52,13 +59,15 @@ if __name__ == "__main__":
         # pos = nx.spring_layout(graph, k=20, iterations=1000, seed=seed)  # positions for all nodes
         ## Default not-connected weights is 1e+6, and edge weight is 1. 
         ## It makes meaningless to put nodes not connected apart. 
-        edge_weight = lambda f, t, a : 1.5e+4
+        edge_weight = lambda f, t, a : 2e+4
         pos = nx.kamada_kawai_layout(graph, weight = edge_weight)
         # pos = nx.shell_layout(graph)
         # pos_list = [nx.circular_layout(graph), nx.random_layout(graph), nx.shell_layout(graph),
         #     nx.spring_layout(graph), nx.spectral_layout(graph), nx.kamada_kawai_layout(graph)]    
         # for pos in pos_list:
+        edges = list(graph.edges())
+        edge_styles = [EDGE_STYLE_MAP[graph[u][v]['weight']] for u,v in edges]
         plt.plot()
-        nx.draw(graph, pos, labels=labels, node_size = 800)
+        nx.draw(graph, pos, labels=labels, node_size = 1000, edgelist = edges, style = edge_styles)
         plt.show()  
     print("min nodes on a graph:", min_nodes)

@@ -95,6 +95,7 @@ public class PCodeExtractorV2 extends BaseTool {
         GraphFactory graphFactory = new GraphFactory(program);
         JSONObject binOut = new JSONObject();
         for (var oneCfgInfo : cfgInfos) {
+            graphFactory.clearState();
             JSONObject oneCfgJson = (JSONObject) oneCfgInfo;
             CFGFunction cfgFunction = graphFactory.constructCfgProgramFromJsonInfo(oneCfgJson);
             JSONObject dumppedGraph = null;

@@ -1,7 +1,5 @@
 package com.gsat.sea;
 
-
-
 import java.util.List;
 import java.util.Comparator;
 import java.util.ArrayList;
@@ -92,7 +90,7 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         for (int i = oplist.size() - 1; i >= endIdx; i--) {
             PcodeOp op = oplist.remove(i);
             if (op.getSeqnum() != null)
-                numSeq--; 
+                numSeq--;
         }
     }
 
@@ -149,7 +147,7 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         if (!oplist.isEmpty()) {
             seqnum = oplist.get(0).getSeqnum();
         }
-        if (seqnum == null && address != null) 
+        if (seqnum == null && address != null)
             seqnum = new SequenceNumber(address, 0);
         assert seqnum != null;
         return seqnum;
@@ -239,9 +237,9 @@ public class CFGBlock implements DAGNode<CFGBlock> {
 
     public int getOpIdxFromOrder(int opOrder) {
         int numOps = oplist.size();
-        for (int i= opOrder; i< numOps; i++) {
+        for (int i = opOrder; i < numOps; i++) {
             SequenceNumber opSeqnum = oplist.get(i).getSeqnum();
-            if (opSeqnum != null && opSeqnum.getOrder() == opOrder) 
+            if (opSeqnum != null && opSeqnum.getOrder() == opOrder)
                 return i;
         }
         return -1;
@@ -308,5 +306,12 @@ public class CFGBlock implements DAGNode<CFGBlock> {
             bbMnems[idx++] = pcode.getMnemonic();
         }
         return bbMnems;
+    }
+
+    public int getEdgeType(int predSlot) {
+        int type = 0;
+        if (predSlot >= 0 && predSlot < cfgIns.size())
+            type =1 ;
+        return type;
     }
 }

@@ -23,6 +23,9 @@ public class SoNGraphBuilder {
     CFGFunction cfgFunction;
     List<CFGBlock> nodes;
 
+    /// 0x4f is a invaild spaceId, so will not conflict with normal address spaces. 
+    static Varnode effectNode = new Varnode(GraphFactory.getStoreSpace().getAddress(0x4f), 1);
+
     public static abstract class AbstractDefState<V> {
         /// Defs are orginized as no intersecting intervals (except 'defs' for constants, 
         ///     they are allowed to have intersrctions). 
@@ -237,7 +240,7 @@ public class SoNGraphBuilder {
                 state.remove(temp);
             }
         }
-    
+
     }
 
     public static class DefState extends AbstractDefState<SoNNode> {
@@ -368,7 +371,17 @@ public class SoNGraphBuilder {
     private void insertPhiNodes(List<Set<Integer>> domfrontsets) {
         /// Get all defsites, i.e. each varnode is defined on which basic blocks
         /// It's important to perserve order (make sure Varnode(A, size=s1) is before Varnode(A, size=s2) where s1 < s2)
-        TreeMap<Varnode, Set<Integer>> defsites = cfgFunction.generateDefsites();
+        TreeMap<Varnode, Set<Integer>> defsites = new TreeMap<>(new AddressInterval.VarnodeComparator());
+        for (CFGBlock n : cfgFunction.getBlocks()) {
+            for (PcodeOp op : n.getPcodeOps()) {
+                Varnode out = op.getOutput();
+                if (out == null)
+                    continue; /// no data out
+                defsites.computeIfAbsent(out, k -> new HashSet<>()).add(n.id());
+                if (SoNOp.hasEffect(op.getOpcode())) /// effect def
+                    defsites.computeIfAbsent(effectNode, k -> new HashSet<>()).add(n.id());
+            }
+        }
         /// Inserting phi nodes 
         for (var ndefs : defsites.entrySet()) {
             AddressInterval interval = AddressInterval.fromVarnode(ndefs.getKey());
@@ -380,7 +393,8 @@ public class SoNGraphBuilder {
                     if (blPhiDefs.keyCovered(interval))
                         continue;
                     int numPre = nodes.get(blId).getPredecessors().size();
-                    blPhiDefs.put(interval, SoNNode.newPhi(regions.get(blId), numPre));
+                    boolean isPhi = ndefs.getKey().equals(effectNode);
+                    blPhiDefs.put(interval, SoNNode.newPhi(regions.get(blId), numPre, isPhi));
                     if (!ndefs.getValue().contains(blId))
                         worklist.push(blId);
                 }
@@ -415,7 +429,6 @@ public class SoNGraphBuilder {
             state.put(entry.getKey(), entry.getValue()); // Add phi defs
         }
         int opIdx = 0, numOps = bl.numOps();
-        SoNNode lastEffectNode = null;
         for (PcodeOp op : bl.getPcodeOps()) {
             opIdx += 1;
             int opc = op.getOpcode(), dataUseStart = SoNOp.dataUseStart(opc);
@@ -435,9 +448,8 @@ public class SoNGraphBuilder {
             }
             /// Link effect edges 
             if (SoNOp.hasEffect(opc)) {
-                if (lastEffectNode != null)
-                    soNNode.addUse(lastEffectNode);
-                lastEffectNode = soNNode;
+                soNNode.addEffectUse(state.peekOrNew(effectNode));
+                state.put(effectNode, soNNode);
             }
             /// Update def
             Varnode out = op.getOutput();
@@ -453,15 +465,12 @@ public class SoNGraphBuilder {
         if (bl.isReturnBlock()) {
             assert blRegion.op() instanceof ReturnRegion;
             assert blRegion.getUses().size() > 1;
-            end.addUse(blRegion); /// Link RETURN-s to END
+            end.addControlUse(blRegion); // Link RETURN-s to END
+            end.addEffectUse(state.peekOrNew(effectNode)); // Link last EFFECT node to END
         }
         /// Process region control inputs
         for (CFGBlock pred : bl.getPredecessors()) {
-            blRegion.addUse(regions.get(pred.id()));
-        }
-        /// Lastly, add effect uses to this region. 
-        if (lastEffectNode != null) {
-            blRegion.addUse(lastEffectNode);
+            blRegion.addControlUse(regions.get(pred.id()));
         }
         /// Link succ's phi nodes
         for (CFGBlock succ : bl.getSuccessors()) {

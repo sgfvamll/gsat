@@ -8,5 +8,6 @@ public interface DAGNode<T extends DAGNode<T>> {
     int hashCode();
     List<T> getPredecessors();
     List<T> getSuccessors();
+    int getEdgeType(int predSlot);
     String[] getFeatureStrs(int opt);
 }
