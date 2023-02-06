@@ -31,13 +31,22 @@ public class SoNGraphBuilder {
         /// When new def overlap with old ones, old ones are cut. 
         protected TreeMap<AddressInterval, V> state;
 
-        protected SoNNode constructAndPut(AddressInterval interval) {
-            SoNNode node = SoNNode.newStoreOrConst(interval);
-            return putOnNewKey(interval, node, true);
+        protected SoNNode handleUndefinedAndPut(AddressInterval interval) {
+            SoNNode node = handleUndefined(interval);
+            putOnNewKey(interval, node);
+            return node;
         }
 
-        protected SoNNode putOnNewKey(AddressInterval interval, SoNNode node) {
-            return putOnNewKey(interval, node, false);
+        public boolean keyHasOverlap(AddressInterval interval) {
+            AddressInterval floorKey = state.floorKey(interval);
+            if (interval.getMinAddress().isConstantAddress()) {
+                return interval.equals(floorKey);
+            }
+            boolean isIntersecting = floorKey != null && interval.intersect(floorKey) != null;
+            if (isIntersecting)
+                return true;
+            AddressInterval higherKey = state.higherKey(interval);
+            return higherKey != null && interval.intersect(higherKey) != null;
         }
 
         public boolean keyCovered(AddressInterval interval) {
@@ -62,7 +71,9 @@ public class SoNGraphBuilder {
             return state.entrySet();
         }
 
-        protected abstract SoNNode putOnNewKey(AddressInterval interval, SoNNode node, boolean definedOnStart);
+        protected abstract SoNNode handleUndefined(AddressInterval interval);
+
+        protected abstract void putOnNewKey(AddressInterval interval, SoNNode node);
 
         protected abstract V remove(AddressInterval interval);
 
@@ -76,7 +87,7 @@ public class SoNGraphBuilder {
 
         public SoNNode peekOrNew(AddressInterval varnode) {
             SoNNode node = peek(varnode);
-            return node == null ? constructAndPut(varnode) : node;
+            return node == null ? handleUndefinedAndPut(varnode) : node;
         }
 
         public SoNNode peek(Varnode varnode) {
@@ -89,7 +100,7 @@ public class SoNGraphBuilder {
                 return eget(sEntry); /// defStack is ensured non-empty
             }
             if (requiredRange.getMinAddress().isConstantAddress()) {
-                return constructAndPut(requiredRange);
+                return null;
             }
             boolean noDefOverlapped = true;
             /// Find all defs that are overlaped with this required use. 
@@ -109,7 +120,7 @@ public class SoNGraphBuilder {
                     int sizeUndefined = (int) (intersectedMin.getOffset()
                             - currentMinAddr.getOffset());
                     AddressInterval undefined = new AddressInterval(currentMinAddr, sizeUndefined);
-                    SoNNode newStorage = SoNNode.newStoreOrConst(undefined);
+                    SoNNode newStorage = handleUndefined(undefined);
                     newDefs.add(new Pair<>(undefined, newStorage));
                     subPieces.add(newStorage);
                     requiredRange = requiredRange.removeFromStart(sizeUndefined);
@@ -131,10 +142,10 @@ public class SoNGraphBuilder {
             if (noDefOverlapped)
                 return null;
             for (var pair : newDefs) {
-                putOnNewKey(pair.first, pair.second, true);
+                putOnNewKey(pair.first, pair.second);
             }
             if (requiredRange != null) {
-                SoNNode newStorage = constructAndPut(requiredRange);
+                SoNNode newStorage = handleUndefinedAndPut(requiredRange);
                 subPieces.add(newStorage);
             }
             SoNNode result;
@@ -155,13 +166,15 @@ public class SoNGraphBuilder {
             return put(AddressInterval.fromVarnode(varnode), node);
         }
 
+        /// Return the old value associated with the key. 
         public SoNNode put(AddressInterval requiredRange, SoNNode node) {
             var sEntry = state.floorEntry(requiredRange);
             if (sEntry != null && sEntry.getKey().equals(requiredRange)) {
                 return eput(sEntry, node);
             }
             if (requiredRange.getMinAddress().isConstantAddress()) {
-                return putOnNewKey(requiredRange, node);
+                putOnNewKey(requiredRange, node);
+                return null;
             }
             /// Find all defined ranges that are covered / partly covered by this new define. And record that. 
             boolean isIntersecting = sEntry != null && requiredRange.intersect(sEntry.getKey()) != null;
@@ -194,9 +207,37 @@ public class SoNGraphBuilder {
                 putOnNewKey(pair.first, pair.second);
             }
             /// Finally, insert the new def. 
-            return putOnNewKey(requiredRange, node);
+            putOnNewKey(requiredRange, node);
+            return null;
         }
 
+        public void removeOverlappedWith(AddressInterval interval) {
+            var sEntry = state.floorEntry(interval);
+            if (sEntry != null && sEntry.getKey().equals(interval)) {
+                /// The key is exactly contained. 
+                state.remove(interval);
+                return;
+            }
+            if (interval.getMinAddress().isConstantAddress()) {
+                return;
+            }
+            /// Find all defs that are overlaped with this required use and then remove them. 
+            boolean isIntersecting = sEntry != null && interval.intersect(sEntry.getKey()) != null;
+            AddressInterval iterStart = isIntersecting ? sEntry.getKey() : interval;
+            List<AddressInterval> tobeRemoved = new ArrayList<>();
+            for (var entry : state.tailMap(iterStart).entrySet()) {
+                AddressInterval eKey = entry.getKey();
+                AddressInterval intersected = interval.intersect(eKey);
+                if (intersected == null)
+                    break;
+                tobeRemoved.add(eKey);
+            }
+            /// Remove all defs that overlap with specific interval
+            for (AddressInterval temp : tobeRemoved) {
+                state.remove(temp);
+            }
+        }
+    
     }
 
     public static class DefState extends AbstractDefState<SoNNode> {
@@ -204,9 +245,13 @@ public class SoNGraphBuilder {
             state = new TreeMap<>();
         }
 
-        protected SoNNode putOnNewKey(AddressInterval interval, SoNNode node, boolean definedOnStart) {
+        protected SoNNode handleUndefined(AddressInterval interval) {
+            return SoNNode.newStoreOrConst(interval);
+        }
+
+        protected void putOnNewKey(AddressInterval interval, SoNNode node) {
             assert !state.containsKey(interval);
-            return state.put(interval, node);
+            state.put(interval, node);
         }
 
         protected SoNNode eput(Map.Entry<AddressInterval, SoNNode> entry, SoNNode node) {
@@ -224,23 +269,30 @@ public class SoNGraphBuilder {
 
     public static class RevertibleDefState extends AbstractDefState<Stack<SoNNode>> {
         Stack<Stack<Pair<AddressInterval, Stack<SoNNode>>>> actions;
+        DefState defsOnStart;
 
         RevertibleDefState() {
+            defsOnStart = new DefState();
             state = new TreeMap<>();
             actions = new Stack<>();
             commit();
         }
 
-        protected SoNNode putOnNewKey(AddressInterval interval, SoNNode node, boolean definedOnStart) {
-            assert !state.containsKey(interval);
-            if (!definedOnStart)
-                recordLog(interval, null);
-            return state.computeIfAbsent(interval, (k) -> new Stack<>()).push(node);
+        protected SoNNode handleUndefined(AddressInterval interval) {
+            return defsOnStart.peekOrNew(interval);
+        }
+
+        protected void putOnNewKey(AddressInterval interval, SoNNode node) {
+            assert !keyHasOverlap(interval);
+            recordLog(interval, null);
+            state.computeIfAbsent(interval, (k) -> new Stack<>()).push(node);
         }
 
         protected SoNNode eput(Map.Entry<AddressInterval, Stack<SoNNode>> entry, SoNNode node) {
             recordLog(entry.getKey(), null);
-            return entry.getValue().push(node);
+            SoNNode ret = entry.getValue().peek();
+            entry.getValue().push(node);
+            return ret;
         }
 
         protected SoNNode eget(Map.Entry<AddressInterval, Stack<SoNNode>> entry) {
@@ -267,6 +319,8 @@ public class SoNGraphBuilder {
                     if (defStack.empty())
                         state.remove(action.first);
                 } else {
+                    removeOverlappedWith(action.first);
+                    assert !keyHasOverlap(action.first);
                     state.put(action.first, action.second);
                 }
             }

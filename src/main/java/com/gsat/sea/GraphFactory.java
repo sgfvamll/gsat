@@ -280,9 +280,10 @@ public class GraphFactory {
 
     void adaptReturn(PcodeOp op, CFGBlock bl, Function function) {
         int orgNumInputs = op.getNumInputs();
-        bl.append(op);
-        if (orgNumInputs >= 2)
+        if (orgNumInputs >= 2) {
+            bl.append(op);
             return;
+        }
         if (orgNumInputs == 0)
             op.setInput(adaptVarnode(defaultReturnAddress, bl), 0);
         Varnode[] outNodes;
@@ -300,6 +301,7 @@ public class GraphFactory {
             /// Void return. 
             op.setInput(newConstant(0), 1);
         }
+        bl.append(op);
     }
 
     void adaptOp(PcodeOp op, CFGBlock bl, Function function) {
