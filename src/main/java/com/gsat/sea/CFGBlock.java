@@ -301,7 +301,7 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         }
     }
 
-    public String[] getFeatureStrs() {
+    public String[] getFeatureStrs(int opt) {
         String[] bbMnems = new String[oplist.size()];
         int idx = 0;
         for (PcodeOp pcode : oplist) {

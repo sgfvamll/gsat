@@ -166,7 +166,7 @@ public class GraphFactory {
         return builder.build();
     }
 
-    public <T extends DAGNode<T>> JSONObject dumpGraph(DAGGraph<T> graph) {
+    public <T extends DAGNode<T>> JSONObject dumpGraph(DAGGraph<T> graph, int verb_level) {
         JSONObject funcOut = new JSONObject();
         ArrayList<Integer> nodes = new ArrayList<Integer>();
         ArrayList<Integer[]> edges = new ArrayList<Integer[]>();
@@ -185,7 +185,7 @@ public class GraphFactory {
                 }
             }
             JSONObject nodeOut = new JSONObject();
-            String[] nodeMnems = node.getFeatureStrs();
+            String[] nodeMnems = node.getFeatureStrs(verb_level);
             nodeOut.put("node_mnems", nodeMnems);
             nodesVerb.put(String.format("%d", node.id()), nodeOut);
         }

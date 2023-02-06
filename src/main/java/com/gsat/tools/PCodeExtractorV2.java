@@ -19,6 +19,7 @@ import ghidra.program.model.listing.Program;
 public class PCodeExtractorV2 extends BaseTool {
     String cfgFilePath;
     String outputFormat;
+    int verbose_level = 0;
 
     public PCodeExtractorV2() {
         this.analysisMode = 1; /// No builtin auto-analysis
@@ -34,6 +35,7 @@ public class PCodeExtractorV2 extends BaseTool {
                 new Option("c", "cfg_file", true,
                         "Path to a json file that contains all selected functions along with its CFG (i.e. *_cfg_disasm.json). "),
                 new Option("of", "output_format", true, "One of {'ACFG', 'SoN', 'tSoN'}"),
+                new Option("v", "verbose_level", true, "`0` for mnems only and `1` for full. "),
         };
     }
 
@@ -45,6 +47,8 @@ public class PCodeExtractorV2 extends BaseTool {
         } catch (Exception e) {
             return false;
         }
+        if (commandLine.hasOption("verbose_level"))
+            verbose_level = Integer.parseInt(commandLine.getOptionValue("verbose_level"), 10);
         return true;
     }
 
@@ -96,11 +100,11 @@ public class PCodeExtractorV2 extends BaseTool {
             JSONObject dumppedGraph = null;
             switch (outputFormat) {
                 case "ACFG":
-                    dumppedGraph = graphFactory.dumpGraph(cfgFunction);
+                    dumppedGraph = graphFactory.dumpGraph(cfgFunction, verbose_level);
                     break;
                 case "SoN":
                     SoNGraph graph = graphFactory.constructSeaOfNodes(cfgFunction);
-                    dumppedGraph = graphFactory.dumpGraph(graph);
+                    dumppedGraph = graphFactory.dumpGraph(graph, verbose_level);
                     break;
             }
             binOut.putOpt((String) oneCfgJson.get("start_ea"), dumppedGraph);

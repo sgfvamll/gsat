@@ -58,6 +58,32 @@ public class SoNOp {
                 return this.getClass().getSimpleName();
             }
         }
+
+        public String toString() {
+            String mnem = mnem();
+            switch (mnem.charAt(0)) {
+                case 'I':
+                    mnem = mnem.replaceFirst("INT_", "I");
+                    break;
+                case 'F':
+                    mnem = mnem.replaceFirst("FLOAT_", "F");
+                    break;
+                case 'B':
+                case 'C':
+                    mnem = mnem.replaceFirst("BRANCH", "Br");
+                    break;
+                case 'S':
+                    mnem = mnem.equals("STORE") ? "SD" : mnem;
+                    break;
+                case 'L':
+                    mnem = mnem.equals("LOAD") ? "LD" : mnem;
+                    break;
+                case 'R':
+                    mnem = mnem.equals("RETURN") ? "RET" : mnem;
+                    break;
+            }
+            return mnem;
+        }
     }
 
     public static class End extends BaseOp {
@@ -81,11 +107,19 @@ public class SoNOp {
         ConstantLong(Long c, int size) {
             super(-2, c, size);
         }
+
+        public String toString() {
+            return String.format("L(%x, %d)", constant, size);
+        }
     }
 
     public static class ConstantDouble extends ConstantOp<Double> {
         ConstantDouble(Double c, int size) {
             super(-3, c, size);
+        }
+
+        public String toString() {
+            return String.format("D(%f, %d)", constant, size);
         }
     }
 
@@ -95,6 +129,10 @@ public class SoNOp {
         MemorySpace(long spaceId) {
             super(-4);
             id = spaceId;
+        }
+
+        public String toString() {
+            return String.format("Space(%x)", id);
         }
     }
 
@@ -106,6 +144,11 @@ public class SoNOp {
             super(opc);
             id = storeId;
             size = storeSize;
+        }
+
+        public String toString() {
+            String short_mnem = mnem().substring(0, 3);
+            return String.format("%s(%x, %d)", short_mnem, id, size);
         }
     }
 
@@ -174,9 +217,14 @@ public class SoNOp {
 
     public static class Project extends BaseOp {
         int outSize;
+
         Project(int outSize) {
             super(PcodeOp.SUBPIECE);
             this.outSize = outSize;
+        }
+
+        public String toString() {
+            return String.format("Project(%d)", outSize);
         }
     }
 

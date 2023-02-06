@@ -6,7 +6,6 @@ import java.util.List;
 import com.gsat.sea.SoNOp.*;
 import com.gsat.sea.analysis.DAGNode;
 
-import ghidra.dbg.gadp.protocol.Gadp.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
@@ -64,8 +63,11 @@ public class SoNNode implements DAGNode<SoNNode> {
         return getUses();
     }
 
-    public String[] getFeatureStrs() {
-        return new String[] { mnemonic() };
+    public String[] getFeatureStrs(int opt) {
+        if (opt > 0)
+            return new String[] { op.toString() };
+        else
+            return new String[] { mnemonic() };
     }
 
     public List<SoNNode> getUses() {
