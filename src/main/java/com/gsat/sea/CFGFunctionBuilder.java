@@ -22,12 +22,14 @@ import java.util.HashSet;
 
 public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
     Address fva;
+    Function function;
     CFGBlock root;
     TreeMap<SequenceNumber, CFGBlock> blocks;
     private Stack<CFGBlock> worklist = null;
 
-    CFGFunctionBuilder(Address start) {
-        fva = start;
+    CFGFunctionBuilder(Function func) {
+        fva = func.getEntryPoint();
+        function = func;
         root = null;
         blocks = new TreeMap<>();
     }
@@ -63,8 +65,8 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
         return result;
     }
 
-    public CFGFunction finalizeFuncion(Function func) {
-        return new CFGFunction(func, getBlocks());
+    public CFGFunction finalizeFuncion() {
+        return new CFGFunction(function, getBlocks());
     }
 
     public int getNumBlocks() {
@@ -350,15 +352,20 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
             if (!bl.isReturnBlock())
                 continue;
             PcodeOp lastOp = bl.getLastOp();
-            if (lastOp == null || lastOp.getOpcode() == PcodeOp.RETURN)
+            if (lastOp != null && lastOp.getOpcode() == PcodeOp.RETURN)
                 continue;
+            if (lastOp == null) {
+                PcodeOp nullReturn = new PcodeOp(null, PcodeOp.RETURN, new Varnode[0], null);
+                graphFactory.adaptOp(nullReturn, bl, function);
+                continue;
+            }
             int opc = lastOp.getOpcode();
             if (opc == PcodeOp.BRANCH || opc == PcodeOp.BRANCHIND) {
                 Varnode target = lastOp.getInput(0);
                 bl.truncateOpList(bl.numOps() - 1);
                 PcodeOp newCall = new PcodeOp(lastOp.getSeqnum(),
                         PcodeOp.CALL, new Varnode[] { target }, null);
-                graphFactory.adaptOp(newCall, bl);
+                graphFactory.adaptOp(newCall, bl, function);
             } else if (opc == PcodeOp.CBRANCH) {
                 Address nextAddr = getAvailableBlockStart();
                 CFGBlock retBl = new CFGBlock(nextAddr, 1);
@@ -367,7 +374,7 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
                 bl = retBl;
             }
             PcodeOp nullReturn = new PcodeOp(null, PcodeOp.RETURN, new Varnode[0], null);
-            graphFactory.adaptOp(nullReturn, bl);
+            graphFactory.adaptOp(nullReturn, bl, function);
         }
     }
 

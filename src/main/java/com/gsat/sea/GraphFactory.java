@@ -25,6 +25,7 @@ import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.lang.PrototypeModel;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
+import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
@@ -39,6 +40,7 @@ public class GraphFactory {
     long uniqueOffset = 0;
     Varnode[] possibleReturnVarnodes;
     Varnode[] possibleCallArgVarnodes;
+    Varnode defaultReturnAddress;
 
     public GraphFactory(Program program) {
         this.program = program;
@@ -53,6 +55,9 @@ public class GraphFactory {
                 possibleCallArgList.add(varnode);
         possibleCallArgVarnodes = possibleCallArgList.toArray(new Varnode[0]);
         possibleReturnVarnodes = defaultCC.getReturnLocation(undefinedPtr, program).getVarnodes();
+        Varnode[] returnAddresses = defaultCC.getReturnAddress();
+        assert returnAddresses.length == 1;
+        defaultReturnAddress = returnAddresses[0];
     }
 
     public Varnode[] getPossibleReturnVarnodes() {
@@ -106,9 +111,11 @@ public class GraphFactory {
         JSONArray nodes = cfgInfo.getJSONArray("nodes");
         JSONArray edges = cfgInfo.getJSONArray("edges");
 
+        Function function = getFunctionAt(fva);
+
         // Step 1: Disasm and build BBs. 
         HashMap<Long, CFGBlock> blockMap = new HashMap<>();
-        CFGFunctionBuilder builder = new CFGFunctionBuilder(fva);
+        CFGFunctionBuilder builder = new CFGFunctionBuilder(function);
         for (Object nodeInfoObj : nodes) {
             JSONArray nodeInfo = (JSONArray) nodeInfoObj;
             Address nodeStartEa = addressFactory.getAddress(nodeInfo.getString(0));
@@ -130,7 +137,7 @@ public class GraphFactory {
             Address instAddr = inst != null ? inst.getAddress() : null;
             while (inst != null && body.contains(instAddr)) {
                 for (PcodeOp op : inst.getPcode()) {
-                    adaptOp(op, cfgBlock);
+                    adaptOp(op, cfgBlock, function);
                 }
                 instAddr = inst.getFallThrough();
                 if (instAddr != null && instAddr.getOffset() < inst.getAddress().getOffset()
@@ -150,7 +157,7 @@ public class GraphFactory {
         }
         builder.fixFlow();
         builder.resolveTailBranches(this);
-        return builder.finalizeFuncion(getFunctionAt(fva));
+        return builder.finalizeFuncion();
     }
 
     public SoNGraph constructSeaOfNodes(CFGFunction cfgFunction) {
@@ -190,8 +197,17 @@ public class GraphFactory {
         return funcOut;
     }
 
+    Varnode[] getReturnVarnodes(Function function) {
+        if (function == null || function.getReturn() == null)
+            return new Varnode[0];
+        Parameter outParam = function.getReturn();
+        return outParam.getVariableStorage().getVarnodes();
+    }
+
     /// TODO Maybe allow varnodes that have intersection. 
     Varnode newProjsToDisjointVarnodes(Varnode[] outnodes, CFGBlock bl) {
+        if (outnodes.length == 0)
+            return null;
         if (outnodes.length == 1)
             return outnodes[0];
         int allSize = 0, offset = 0;
@@ -212,10 +228,83 @@ public class GraphFactory {
         return retVarnode;
     }
 
-    void adaptOp(PcodeOp op, CFGBlock bl) {
+    /// Data uses of stack / memory storage should be loadded first. 
+    Varnode adaptVarnode(Varnode varnode, CFGBlock bl) {
+        Address addr = varnode.getAddress();
+        if (addr.isStackAddress() || addr.isMemoryAddress()) {
+            /// New Load PcodeOp
+            Varnode spaceIdC = newStore(varnode.getSpace());
+            PcodeOp load = new PcodeOp(null, PcodeOp.LOAD,
+                    new Varnode[] { spaceIdC, varnode }, newUnique(varnode.getSize()));
+            bl.append(load);
+        }
+        return varnode;
+    }
+
+    void adaptCall(PcodeOp callOp, CFGBlock bl) {
+        int opc = callOp.getOpcode();
+        /// Identify call args first by decompiled parameters. 
+        boolean succ = false;
+        List<Varnode> args = new ArrayList<>(4);
+        Varnode[] outNodes = null;
+        _1_linkByCalleeParams: if (opc == PcodeOp.CALL) {
+            var callee = getFunctionAt(callOp.getInput(0).getAddress());
+            if (callee == null)
+                break _1_linkByCalleeParams;
+            var parameters = callee.getParameters();
+            if (parameters == null)
+                break _1_linkByCalleeParams;
+            succ = true;
+            for (var param : parameters) {
+                for (Varnode varnode : param.getVariableStorage().getVarnodes()) {
+                    args.add(adaptVarnode(varnode, bl));
+                }
+            }
+            if (callee.getReturn() != null)
+                outNodes = callee.getReturn().getVariableStorage().getVarnodes();
+        }
+        if (!succ) {
+            /// Identify call args then by the default calling convension. 
+            for (var varnode : getPossibleCallArgVarnodes()) {
+                args.add(adaptVarnode(varnode, bl));
+            }
+        }
+        if (outNodes == null)
+            outNodes = possibleReturnVarnodes;
+        for (int idx = args.size() - 1; idx >= 0; idx--) {
+            callOp.setInput(args.get(idx), idx + 1);
+        }
+        bl.append(callOp);
+        callOp.setOutput(newProjsToDisjointVarnodes(outNodes, bl));
+    }
+
+    void adaptReturn(PcodeOp op, CFGBlock bl, Function function) {
+        int orgNumInputs = op.getNumInputs();
+        bl.append(op);
+        if (orgNumInputs >= 2)
+            return;
+        if (orgNumInputs == 0)
+            op.setInput(adaptVarnode(defaultReturnAddress, bl), 0);
+        Varnode[] outNodes;
+        if (function != null && function.getReturn() != null) {
+            /// Get possible return nodes by decompiled parameters. 
+            outNodes = function.getReturn().getVariableStorage().getVarnodes();
+        } else {
+            /// Get possible return nodes by the calling convension. 
+            outNodes = getPossibleReturnVarnodes();
+        }
+        for (int i = outNodes.length - 1; i >= 0; i--) {
+            op.setInput(outNodes[i], i + 1);
+        }
+        if (outNodes.length == 0) {
+            /// Void return. 
+            op.setInput(newConstant(0), 1);
+        }
+    }
+
+    void adaptOp(PcodeOp op, CFGBlock bl, Function function) {
         /// new PcodeOp-s can be added here, but its seqnum should be set to null. 
         int opc = op.getOpcode();
-        bl.append(op);
         if (opc == PcodeOp.STORE || opc == PcodeOp.LOAD) {
             /// Replace the address space of the space ID constants 
             Varnode space = op.getInput(0);
@@ -223,10 +312,13 @@ public class GraphFactory {
             op.setInput(store, 0);
             if (opc == PcodeOp.STORE)
                 op.setOutput(store);
+            bl.append(op);
         } else if (SoNOp.isCall(opc)) {
-            assert possibleReturnVarnodes.length > 0;
-            op.setOutput(
-                    newProjsToDisjointVarnodes(possibleReturnVarnodes, bl));
+            adaptCall(op, bl);
+        } else if (opc == PcodeOp.RETURN) {
+            adaptReturn(op, bl, function);
+        } else {
+            bl.append(op);
         }
     }
 

@@ -9,7 +9,6 @@ import com.gsat.sea.analysis.DAGGraph;
 
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
-import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 
@@ -49,13 +48,6 @@ public class CFGFunction implements DAGGraph<CFGBlock> {
             }
         }
         return defsites;
-    }
-
-    public Varnode[] getReturnVarnodes() {
-        if (function == null || function.getReturn() == null) 
-            return new Varnode[0];
-        Parameter outParam = function.getReturn();
-        return outParam.getVariableStorage().getVarnodes();
     }
 
 }

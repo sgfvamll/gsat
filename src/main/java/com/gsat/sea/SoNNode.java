@@ -110,17 +110,15 @@ public class SoNNode implements DAGNode<SoNNode> {
         } else if (space.isRegisterSpace()) {
             return SoNNode.newRegisterStore(offset, size); // one register store
         } else if (space.isMemorySpace()) {
-            return SoNNode.newStackStore(offset, size); // one memory store
+            return SoNNode.newMemoryStore(offset, size); // one memory store
         } else if (space.isStackSpace()) {
             return SoNNode.newStackStore(offset, size); // one stack store
         }
         return SoNNode.newOtherStore(space.getSpaceID(), offset, size);
     }
 
-    public static SoNNode newRegion(PcodeOp last, boolean isReturnBlock) {
+    public static SoNNode newRegion(PcodeOp last) {
         SoNNode controlNode = null;
-        if (isReturnBlock)
-            return SoNNode.newReturnRegion(0);
         if (last == null)
             controlNode = SoNNode.newBrRegion(0);
         else {
@@ -133,7 +131,7 @@ public class SoNNode implements DAGNode<SoNNode> {
                     controlNode = SoNNode.newBrIndRegion(1);
                     break;
                 case PcodeOp.RETURN:
-                    assert false;
+                    controlNode = SoNNode.newReturnRegion(SoNOp.numDataUseOfPcodeOp(last));
                     break;
                 default:
                     controlNode = SoNNode.newBrRegion(0);

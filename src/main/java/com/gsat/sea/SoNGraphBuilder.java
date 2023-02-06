@@ -305,7 +305,8 @@ public class SoNGraphBuilder {
             phiDefs.add(new DefState());
             /// Init Region Nodes. 
             PcodeOp last = n.getLastOp();
-            SoNNode controlNode = SoNNode.newRegion(last, n.isReturnBlock());
+            assert !n.isReturnBlock() || last.getOpcode() == PcodeOp.RETURN;
+            SoNNode controlNode = SoNNode.newRegion(last);
             regions.add(controlNode);
         }
     }
@@ -378,12 +379,6 @@ public class SoNGraphBuilder {
                 Varnode input = op.getInput(i);
                 soNNode.setUse(i - dataUseStart, state.peekOrNew(input));
             }
-            /// Link Call arguments 
-            if (SoNOp.isCall(opc)) {
-                for (SoNNode arg : getPotentialCallArgs(op)) {
-                    soNNode.addUse(arg);
-                }
-            }
             /// Link effect edges 
             if (SoNOp.hasEffect(opc)) {
                 if (lastEffectNode != null)
@@ -403,12 +398,8 @@ public class SoNGraphBuilder {
         /// Process the return block. 
         if (bl.isReturnBlock()) {
             assert blRegion.op() instanceof ReturnRegion;
+            assert blRegion.getUses().size() > 1;
             end.addUse(blRegion); /// Link RETURN-s to END
-            /// Extract return values. 
-            /// getPotentialReturnValues return at least one node. 
-            for (SoNNode ret : getPotentialReturnValues()) {
-                blRegion.addUse(ret);
-            }
         }
         /// Process region control inputs
         for (CFGBlock pred : bl.getPredecessors()) {
@@ -425,75 +416,6 @@ public class SoNGraphBuilder {
                 entry.getValue().setUse(j, state.peekOrNew(entry.getKey()));
             }
         }
-    }
-
-    /// ----------------------------------------------------
-    /// Utils 
-    /// ----------------------------------------------------
-    private List<SoNNode> getPotentialCallArgs(PcodeOp op) {
-        List<SoNNode> callArgs = new ArrayList<>();
-        int opc = op.getOpcode();
-        /// 1. By decompiled parameters. 
-        boolean succ = false;
-        _1_linkByCalleeParams: if (opc == PcodeOp.CALL) {
-            var callee = graphFactory.getFunctionAt(op.getInput(0).getAddress());
-            if (callee == null)
-                break _1_linkByCalleeParams;
-            var parameters = callee.getParameters();
-            if (parameters == null)
-                break _1_linkByCalleeParams;
-            succ = true;
-            boolean stackUsed = false;
-            for (var param : parameters) {
-                for (Varnode varnode : param.getVariableStorage().getVarnodes()) {
-                    /// TODO Maybe fix STORE output and feed stack entry (rather than stack space) 
-                    boolean isStack = varnode.getAddress().isStackAddress();
-                    if (isStack && !stackUsed) {
-                        varnode = graphFactory.newStore(varnode.getSpace());
-                        stackUsed = true;
-                    } else if (isStack) {
-                        continue;
-                    }
-                    callArgs.add(state.peekOrNew(varnode));
-                }
-            }
-        }
-        if (succ)
-            return callArgs;
-        /// 2. By the default calling convension. 
-        for (var varnode : graphFactory.getPossibleCallArgVarnodes()) {
-            SoNNode def = state.peek(varnode);
-            if (def != null)
-                callArgs.add(def);
-        }
-        /// Also add the StackStore as a use. 
-        Varnode stackStore = graphFactory.newStackStore();
-        callArgs.add(state.peekOrNew(stackStore));
-        return callArgs;
-    }
-
-    private List<SoNNode> getPotentialReturnValues() {
-        /// Determine the return value. That is, link data uses of the ReturnRegion node. 
-        List<SoNNode> returnValues = new ArrayList<>();
-        /// 1. By decompiled parameters. 
-        for (Varnode varnode : cfgFunction.getReturnVarnodes()) {
-            SoNNode def = state.peek(varnode);
-            if (def != null)
-                returnValues.add(def);
-        }
-        if (!returnValues.isEmpty())
-            return returnValues;
-        /// 2. By the calling convension. 
-        for (Varnode ret : graphFactory.getPossibleReturnVarnodes()) {
-            SoNNode def = state.peek(ret);
-            if (def != null)
-                returnValues.add(def);
-        }
-        if (!returnValues.isEmpty())
-            return returnValues;
-        /// 3. Void return
-        returnValues.add(SoNNode.newStoreOrConst(graphFactory.newConstant(0)));
-        return returnValues;
     }
 
 }
