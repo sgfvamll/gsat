@@ -156,10 +156,13 @@ public class CFGBlock implements DAGNode<CFGBlock> {
     /// Warning, first op seqnum may not be the least seqnum 
     /// Considering delay slots. 
     public SequenceNumber getLastOpSeqNum() {
-        if (oplist.isEmpty()) {
+        if (numSeq == 0) {
             return new SequenceNumber(address, 0);
-        } else {
-            return oplist.get(oplist.size() - 1).getSeqnum();
+        } else { // There are numSeq ops whose seqnums are not null. 
+            int i = oplist.size() - 1;
+            while (oplist.get(i).getSeqnum() == null)
+                i--;
+            return oplist.get(i).getSeqnum();
         }
     }
 
