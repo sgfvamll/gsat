@@ -37,6 +37,7 @@ public class AddressInterval implements Comparable<AddressInterval> {
 
     /// Remove (in-place) first n addresses if n < size. 
     public AddressInterval removeFromStart(long n) {
+        assert n >= 0;
         if (n >= size)
             return null;
         minAddress = minAddress.addWrap(n);
@@ -49,6 +50,9 @@ public class AddressInterval implements Comparable<AddressInterval> {
         if (!minAddress.getAddressSpace().equals(oStart.getAddressSpace())) {
             return new AddressInterval[0];
         }
+        other = intersect(other);
+        if (other == null)
+            return new AddressInterval[] { new AddressInterval(minAddress, size) };
         long otherStartOffset = other.getMinAddress().subtract(minAddress);
         long otherEndOffset = otherStartOffset + other.getLength();
         int retsize = (otherEndOffset < size ? 1 : 0) + (otherStartOffset > 0 ? 1 : 0);
@@ -67,10 +71,11 @@ public class AddressInterval implements Comparable<AddressInterval> {
             return null;
         }
         Address min = minAddress.compareTo(oStart) < 0 ? oStart : minAddress;
-        long thisEndOffset = minAddress.getOffset() + size - min.getOffset();
-        long oEndOffset = oStart.getOffset() - min.getOffset() + other.getLength();
-        long length = thisEndOffset < oEndOffset ? thisEndOffset : oEndOffset;
-        return length > 0 ? new AddressInterval(min, length) : null;
+        Address thisEnd = minAddress.addWrap(size - 1);
+        Address oEnd = oStart.addWrap(other.getLength() - 1);
+        Address max = thisEnd.compareTo(oEnd) < 0 ? thisEnd : oEnd;
+        long length = max.subtract(min) + 1;
+        return max.compareTo(min) >= 0 ? new AddressInterval(min, length) : null;
     }
 
     @Override
