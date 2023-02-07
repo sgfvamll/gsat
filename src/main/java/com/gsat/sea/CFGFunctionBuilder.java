@@ -277,7 +277,7 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
             bl.linkOut(retbl);
         }
     }
-    
+
     /// Link the block with its branch target. 
     private void linkBranchTarget(CFGBlock cur, CFGBlock fallThrough) {
         PcodeOp lastOp = cur.getLastOp();
@@ -350,6 +350,7 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
     /// For tail conditional branches, add another return block to fix it. 
     /// For other cases, just append a return op. 
     public void resolveTailBranches(GraphFactory graphFactory) {
+        List<CFGBlock> newReturns = new ArrayList<>();
         for (CFGBlock bl : blocks.values()) {
             if (!bl.isReturnBlock())
                 continue;
@@ -372,12 +373,14 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
                 Address nextAddr = getAvailableBlockStart();
                 CFGBlock retBl = new CFGBlock(nextAddr, 1);
                 bl.linkOut(retBl);
-                append(retBl);
+                newReturns.add(retBl);
                 bl = retBl;
             }
             PcodeOp nullReturn = new PcodeOp(null, PcodeOp.RETURN, new Varnode[0], null);
             graphFactory.adaptOp(nullReturn, bl, function);
         }
+        for (CFGBlock retBl : newReturns)
+            append(retBl);
     }
 
 }
