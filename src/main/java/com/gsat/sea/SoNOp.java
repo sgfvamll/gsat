@@ -70,7 +70,7 @@ public class SoNOp {
                     break;
                 case 'B':
                 case 'C':
-                    mnem = mnem.replaceFirst("BRANCH", "Br");
+                    mnem = mnem.replaceFirst("BRANCH", "BR");
                     break;
                 case 'S':
                     mnem = mnem.equals("STORE") ? "SD" : mnem;
@@ -80,6 +80,9 @@ public class SoNOp {
                     break;
                 case 'R':
                     mnem = mnem.equals("RETURN") ? "RET" : mnem;
+                    break;
+                case 'M':
+                    mnem = mnem.equals("MULTIEQUAL") ? "PHI" : mnem;
                     break;
             }
             return mnem;

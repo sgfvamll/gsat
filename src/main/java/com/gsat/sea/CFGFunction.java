@@ -8,21 +8,20 @@ import java.util.HashSet;
 import com.gsat.sea.analysis.DAGGraph;
 
 import ghidra.program.model.address.Address;
-import ghidra.program.model.listing.Function;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 
 public class CFGFunction implements DAGGraph<CFGBlock> {
-    Function function;
+    Address fva;
     List<CFGBlock> blocks;
 
-    CFGFunction(Function func, List<CFGBlock> nodes) {
-        function = func;
+    CFGFunction(Address start, List<CFGBlock> nodes) {
+        fva = start;
         blocks = nodes;
     }
 
     public Address getAddress() {
-        return function.getEntryPoint();
+        return fva;
     }
 
     public CFGBlock root() {

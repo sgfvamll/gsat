@@ -23,6 +23,7 @@ import ghidra.program.model.address.GenericAddressSpace;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.lang.PrototypeModel;
+import ghidra.program.model.lang.Register;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Parameter;
@@ -31,33 +32,71 @@ import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 
 public class GraphFactory {
-    Program program;
+    static int nDefaultArgs = 4;
     static AddressSpace storeSpace = new GenericAddressSpace(
             "STORE", 32, AddressSpace.TYPE_UNIQUE, 0x328);
+
     AddressSpace newUniqueSpace = new GenericAddressSpace(
             "NewUnique", 32, AddressSpace.TYPE_UNIQUE, 0x329);
+    Program program;
     AddressSpace constantSpace;
     long uniqueOffset = 0;
+
     Varnode[] possibleReturnVarnodes;
     Varnode[] possibleCallArgVarnodes;
+
+    /// When inserting RETURN op (e.g. handling tail call), use this as the return address. 
     Varnode defaultReturnAddress;
 
     public GraphFactory(Program program) {
         this.program = program;
         constantSpace = program.getAddressFactory().getConstantSpace();
-        DataTypeManager dtmanager = program.getDataTypeManager();
-        DataType undefinedPtr = dtmanager.getPointer(dtmanager.getDataType(0));
-        /// TODO Modify ghidra api to add all possible input varnodes and output varnodes
+
         PrototypeModel defaultCC = program.getCompilerSpec().getDefaultCallingConvention();
+
+        /// Determine default varnodes where call args are placed. 
         List<Varnode> possibleCallArgList = new ArrayList<>();
         for (var storage : defaultCC.getPotentialInputRegisterStorage(program))
             for (Varnode varnode : storage.getVarnodes())
                 possibleCallArgList.add(varnode);
+        long stackOffset = defaultCC.getStackParameterOffset();
+        int pointerSize = program.getDefaultPointerSize();
+        AddressSpace stkAddrSpace = program.getAddressFactory().getStackSpace();
+        for (int i = 0; i < nDefaultArgs - possibleCallArgList.size(); i++)
+            possibleCallArgList.add(new Varnode(stkAddrSpace.getAddress(stackOffset), pointerSize));
         possibleCallArgVarnodes = possibleCallArgList.toArray(new Varnode[0]);
-        possibleReturnVarnodes = defaultCC.getReturnLocation(undefinedPtr, program).getVarnodes();
+
+        /// Need customized ghidra build to provide `getPotentialOutputRegisterStorage` api. 
+        List<Varnode> possibleReturnValueList = new ArrayList<>();
+        for (var storage : defaultCC.getPotentialOutputRegisterStorage(program))
+            for (Varnode varnode : storage.getVarnodes())
+                possibleReturnValueList.add(varnode);
+        possibleReturnVarnodes = possibleReturnValueList.toArray(new Varnode[0]);
+        if (possibleReturnVarnodes.length == 0) {
+            /// Determine default varnodes where return values are placed. 
+            DataTypeManager dtmanager = program.getDataTypeManager();
+            DataType undefinedPtr = dtmanager.getPointer(dtmanager.getDataType(0));
+            possibleReturnVarnodes = defaultCC.getReturnLocation(undefinedPtr, program).getVarnodes();
+        }
+
+        /// Determine default varnodes where return address is placed. 
         Varnode[] returnAddresses = defaultCC.getReturnAddress();
-        assert returnAddresses.length == 1;
-        defaultReturnAddress = returnAddresses[0];
+        if (returnAddresses.length >= 1) {
+            assert returnAddresses.length == 1; // Assert for debug. 
+            defaultReturnAddress = returnAddresses[0];
+        } else {
+            String languageId = program.getLanguageID().getIdAsString();
+            String returnAddrName = null;
+            if (languageId.startsWith("MIPS"))
+                returnAddrName = "ra";
+            else if (languageId.startsWith("AARCH64"))
+                returnAddrName = "x30"; // lr
+            else if (languageId.startsWith("ARM"))
+                returnAddrName = "lr";
+            assert returnAddrName != null;
+            Register retReg = program.getLanguage().getRegister(returnAddrName);
+            defaultReturnAddress = new Varnode(retReg.getAddress(), retReg.getNumBytes());
+        }
     }
 
     public void clearState() {
@@ -119,7 +158,7 @@ public class GraphFactory {
 
         // Step 1: Disasm and build BBs. 
         HashMap<Long, CFGBlock> blockMap = new HashMap<>();
-        CFGFunctionBuilder builder = new CFGFunctionBuilder(function);
+        CFGFunctionBuilder builder = new CFGFunctionBuilder(fva, function);
         for (Object nodeInfoObj : nodes) {
             JSONArray nodeInfo = (JSONArray) nodeInfoObj;
             Address nodeStartEa = addressFactory.getAddress(nodeInfo.getString(0));

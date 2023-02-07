@@ -22,7 +22,7 @@ public class PCodeExtractorV2 extends BaseTool {
     int verbose_level = 0;
 
     public PCodeExtractorV2() {
-        this.analysisMode = 1; /// No builtin auto-analysis
+        this.analysisMode = 1; /// Fast analysis
     }
 
     public static String getName() {

@@ -27,8 +27,8 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
     TreeMap<SequenceNumber, CFGBlock> blocks;
     private Stack<CFGBlock> worklist = null;
 
-    CFGFunctionBuilder(Function func) {
-        fva = func.getEntryPoint();
+    CFGFunctionBuilder(Address start, Function func) {
+        fva = start;
         function = func;
         root = null;
         blocks = new TreeMap<>();
@@ -66,7 +66,7 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
     }
 
     public CFGFunction finalizeFuncion() {
-        return new CFGFunction(function, getBlocks());
+        return new CFGFunction(fva, getBlocks());
     }
 
     public int getNumBlocks() {
