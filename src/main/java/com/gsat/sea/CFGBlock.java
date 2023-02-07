@@ -203,7 +203,7 @@ public class CFGBlock implements DAGNode<CFGBlock> {
 
     public boolean containingSeqNum(SequenceNumber seqnum) {
         for (PcodeOp op : oplist) {
-            if (op.getSeqnum().equals(seqnum))
+            if (op.getSeqnum() != null && op.getSeqnum().equals(seqnum))
                 return true;
         }
         return false;
@@ -212,6 +212,7 @@ public class CFGBlock implements DAGNode<CFGBlock> {
     public boolean startsAt(SequenceNumber seqnum) {
         if (oplist.size() == 0)
             return seqnum.getTime() == 0 && seqnum.getTarget().equals(address);
+        assert oplist.get(0).getSeqnum() != null;
         return oplist.get(0).getSeqnum().equals(seqnum);
     }
 
@@ -261,6 +262,9 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         return getOpIdxFromSeqnum(new SequenceNumber(splitAddr, 0));
     }
 
+    /// Maybe we should ensure that the splitting is only allowed 
+    ///     when the first op of the new block has a no null seqnum. 
+    /// That is, we should split by the opOrder rather than the opIdx. 
     public CFGBlock splitAt(int opIdx) {
         int numOps = oplist.size();
         assert opIdx > 0 && opIdx < numOps;
@@ -311,7 +315,7 @@ public class CFGBlock implements DAGNode<CFGBlock> {
     public int getEdgeType(int predSlot) {
         int type = 0;
         if (predSlot >= 0 && predSlot < cfgIns.size())
-            type =1 ;
+            type = 1;
         return type;
     }
 }

@@ -179,8 +179,14 @@ public class GraphFactory {
             }
             Address instAddr = inst != null ? inst.getAddress() : null;
             while (inst != null && body.contains(instAddr)) {
-                for (PcodeOp op : inst.getPcode()) {
+                PcodeOp[] oplist = inst.getPcode();
+                for (PcodeOp op : oplist) {
                     adaptOp(op, cfgBlock, function);
+                }
+                if (oplist.length == 0) { // Placeholder to fill gaps. Gaps inside a function may confuse further analysis. 
+                    Varnode inout = newUnique(program.getDefaultPointerSize());
+                    PcodeOp nop = new PcodeOp(instAddr, 0, PcodeOp.COPY, new Varnode[] { inout }, inout);
+                    adaptOp(nop, cfgBlock, function);
                 }
                 instAddr = inst.getFallThrough();
                 if (instAddr != null && instAddr.getOffset() < inst.getAddress().getOffset()

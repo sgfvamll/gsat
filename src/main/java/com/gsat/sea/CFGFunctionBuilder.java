@@ -119,6 +119,8 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
     /// Get first OpSite that starts at the address
     public OpSite getOpSiteAtAddress(Address address) {
         CFGBlock targetBl = getFirstBlockContaining(address);
+        if (targetBl == null)
+            return null;
         int opIdx = targetBl.getOpIdxFromAddress(address);
         if (opIdx == -1)
             return null;
