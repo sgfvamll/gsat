@@ -1,5 +1,7 @@
 package com.gsat.sea;
 
+import com.google.common.base.CaseFormat;
+
 import ghidra.program.model.pcode.PcodeOp;
 
 public class SoNOp {
@@ -55,7 +57,8 @@ public class SoNOp {
             if (opcode >= 0) {
                 return PcodeOp.getMnemonic(opcode);
             } else {
-                return this.getClass().getSimpleName();
+                String mnem = this.getClass().getSimpleName();
+                return CaseFormat.UPPER_CAMEL.to(CaseFormat.UPPER_UNDERSCORE, mnem);
             }
         }
 
@@ -69,6 +72,7 @@ public class SoNOp {
                     mnem = mnem.replaceFirst("FLOAT_", "F");
                     break;
                 case 'B':
+                    mnem = mnem.replaceFirst("BOOL_", "B");
                 case 'C':
                     mnem = mnem.replaceFirst("BRANCH", "BR");
                     break;
@@ -85,6 +89,11 @@ public class SoNOp {
                     mnem = mnem.equals("MULTIEQUAL") ? "PHI" : mnem;
                     break;
             }
+            char lastCh = mnem.charAt(mnem.length()-1);
+            if (lastCh == 'L')
+                mnem = mnem.replace("EQUAL", "EQ");
+            else if (lastCh == 'E')
+                mnem = mnem.replace("NEGATE", "NEG");
             return mnem;
         }
     }
@@ -135,7 +144,7 @@ public class SoNOp {
         }
 
         public String toString() {
-            return String.format("Space(%x)", id);
+            return String.format("SPACE(%x)", id);
         }
     }
 
@@ -227,7 +236,7 @@ public class SoNOp {
         }
 
         public String toString() {
-            return String.format("Project(%d)", outSize);
+            return String.format("PROJ(%d)", outSize);
         }
     }
 
