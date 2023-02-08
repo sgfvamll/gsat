@@ -106,7 +106,7 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
         }
         while (orderOffset >= current.numSeq()) {
             orderOffset -= current.numSeq();
-            SequenceNumber lastOpSeqnum = current.getLastOpSeqNum();
+            SequenceNumber lastOpSeqnum = current.getLastSeqNum();
             var entry = blocks.higherEntry(lastOpSeqnum);
             if (entry == null)
                 return null;
@@ -357,12 +357,7 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
             PcodeOp lastOp = bl.getLastOp();
             if (lastOp != null && lastOp.getOpcode() == PcodeOp.RETURN)
                 continue;
-            if (lastOp == null) {
-                PcodeOp nullReturn = new PcodeOp(null, PcodeOp.RETURN, new Varnode[0], null);
-                graphFactory.adaptOp(nullReturn, bl, function);
-                continue;
-            }
-            int opc = lastOp.getOpcode();
+            int opc = lastOp != null ? lastOp.getOpcode() : PcodeOp.PCODE_MAX;
             if (opc == PcodeOp.BRANCH || opc == PcodeOp.BRANCHIND) {
                 Varnode target = lastOp.getInput(0);
                 bl.truncateOpList(bl.numOps() - 1);
@@ -376,7 +371,8 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
                 newReturns.add(retBl);
                 bl = retBl;
             }
-            PcodeOp nullReturn = new PcodeOp(null, PcodeOp.RETURN, new Varnode[0], null);
+            PcodeOp nullReturn = new PcodeOp(
+                    bl.getLastSeqNum(), PcodeOp.RETURN, new Varnode[0], null);
             graphFactory.adaptOp(nullReturn, bl, function);
         }
         for (CFGBlock retBl : newReturns)

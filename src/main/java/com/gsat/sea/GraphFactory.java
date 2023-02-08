@@ -29,6 +29,7 @@ import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.PcodeOp;
+import ghidra.program.model.pcode.SequenceNumber;
 import ghidra.program.model.pcode.Varnode;
 
 public class GraphFactory {
@@ -148,6 +149,11 @@ public class GraphFactory {
         return newStore(spaceId);
     }
 
+    public PcodeOp newNop(Address address) {
+        Varnode inout = newUnique(program.getDefaultPointerSize());
+        return new PcodeOp(address, 0, PcodeOp.COPY, new Varnode[] { inout }, inout);
+    }
+
     public CFGFunction constructCfgProgramFromJsonInfo(JSONObject cfgInfo) {
         AddressFactory addressFactory = program.getAddressFactory();
         Address fva = addressFactory.getAddress(cfgInfo.getString("start_ea"));
@@ -174,25 +180,25 @@ public class GraphFactory {
             AnalysisHelper.disasmBody(program, body, false);
             Instruction inst = program.getListing().getInstructionAt(nodeStartEa);
             if (inst == null) {
-                ColoredPrint.warning("Disasm inst at %x failed. ", nodeStartEa.getOffset());
+                ColoredPrint.warning("Disasm inst at %x failed. NOP filled. ", nodeStartEa.getOffset());
+                adaptOp(newNop(nodeStartEa), cfgBlock, function);
                 inst = program.getListing().getInstructionAfter(nodeStartEa);
             }
             Address instAddr = inst != null ? inst.getAddress() : null;
             while (inst != null && body.contains(instAddr)) {
+                /// inst.getPcode() will not only get the corresponding pcode ops of this instruction 
+                ///     but also merge the pcodes of instuctions resided in its delay slots. 
+                /// Example: 00402e94 - bne xxx; 00402e98 - sb xxx. 
+                /// inst = `bne xxx`; inst.getPcode() will return the pcodes corresponding to `sb xxx; bne xxx;`. 
+                /// And inst.getFallThrough() will return 00402e9C. 
                 PcodeOp[] oplist = inst.getPcode();
                 for (PcodeOp op : oplist) {
                     adaptOp(op, cfgBlock, function);
                 }
-                if (oplist.length == 0) { // Placeholder to fill gaps. Gaps inside a function may confuse further analysis. 
-                    Varnode inout = newUnique(program.getDefaultPointerSize());
-                    PcodeOp nop = new PcodeOp(instAddr, 0, PcodeOp.COPY, new Varnode[] { inout }, inout);
-                    adaptOp(nop, cfgBlock, function);
+                if (oplist.length == 0) { // Placeholder to fill gaps. Gaps inside a block may confuse further analysis. 
+                    adaptOp(newNop(instAddr), cfgBlock, function);
                 }
                 instAddr = inst.getFallThrough();
-                if (instAddr != null && instAddr.getOffset() < inst.getAddress().getOffset()
-                        && body.contains(instAddr)) {
-                    ColoredPrint.info("Delay slot?");
-                }
                 inst = instAddr != null ? program.getListing().getInstructionAt(instAddr) : null;
             }
         }
@@ -255,7 +261,7 @@ public class GraphFactory {
     }
 
     /// TODO Maybe allow varnodes that have intersection. 
-    Varnode newProjsToDisjointVarnodes(Varnode[] outnodes, CFGBlock bl) {
+    Varnode newProjsToDisjointVarnodes(Varnode[] outnodes, SequenceNumber seqnum, CFGBlock bl) {
         if (outnodes.length == 0)
             return null;
         if (outnodes.length == 1)
@@ -268,7 +274,7 @@ public class GraphFactory {
         Varnode retVarnode = newUnique(allSize);
         /// Project this unique by SUBPIECE-s
         for (var varnode : possibleReturnVarnodes) {
-            PcodeOp subPiece = new PcodeOp(null, PcodeOp.SUBPIECE, 2, varnode);
+            PcodeOp subPiece = new PcodeOp(seqnum, PcodeOp.SUBPIECE, 2, varnode);
             Varnode constantNode = newConstant(offset);
             subPiece.setInput(retVarnode, 0);
             subPiece.setInput(constantNode, 1);
@@ -279,12 +285,12 @@ public class GraphFactory {
     }
 
     /// Data uses of stack / memory storage should be loadded first. 
-    Varnode adaptVarnode(Varnode varnode, CFGBlock bl) {
+    Varnode adaptVarnode(Varnode varnode, SequenceNumber seqnum, CFGBlock bl) {
         Address addr = varnode.getAddress();
         if (addr.isStackAddress() || addr.isMemoryAddress()) {
             /// New Load PcodeOp
             Varnode spaceIdC = newStore(varnode.getSpace());
-            PcodeOp load = new PcodeOp(null, PcodeOp.LOAD,
+            PcodeOp load = new PcodeOp(seqnum, PcodeOp.LOAD,
                     new Varnode[] { spaceIdC, varnode }, newUnique(varnode.getSize()));
             bl.append(load);
         }
@@ -292,6 +298,7 @@ public class GraphFactory {
     }
 
     void adaptCall(PcodeOp callOp, CFGBlock bl) {
+        SequenceNumber seqnum = callOp.getSeqnum();
         int opc = callOp.getOpcode();
         /// Identify call args first by decompiled parameters. 
         boolean succ = false;
@@ -307,7 +314,7 @@ public class GraphFactory {
             succ = true;
             for (var param : parameters) {
                 for (Varnode varnode : param.getVariableStorage().getVarnodes()) {
-                    args.add(adaptVarnode(varnode, bl));
+                    args.add(adaptVarnode(varnode, seqnum, bl));
                 }
             }
             if (callee.getReturn() != null)
@@ -316,7 +323,7 @@ public class GraphFactory {
         if (!succ) {
             /// Identify call args then by the default calling convension. 
             for (var varnode : getPossibleCallArgVarnodes()) {
-                args.add(adaptVarnode(varnode, bl));
+                args.add(adaptVarnode(varnode, seqnum, bl));
             }
         }
         if (outNodes == null)
@@ -325,17 +332,18 @@ public class GraphFactory {
             callOp.setInput(args.get(idx), idx + 1);
         }
         bl.append(callOp);
-        callOp.setOutput(newProjsToDisjointVarnodes(outNodes, bl));
+        callOp.setOutput(newProjsToDisjointVarnodes(outNodes, seqnum, bl));
     }
 
     void adaptReturn(PcodeOp op, CFGBlock bl, Function function) {
+        SequenceNumber seqnum = op.getSeqnum();
         int orgNumInputs = op.getNumInputs();
         if (orgNumInputs >= 2) {
             bl.append(op);
             return;
         }
         if (orgNumInputs == 0)
-            op.setInput(adaptVarnode(defaultReturnAddress, bl), 0);
+            op.setInput(adaptVarnode(defaultReturnAddress, seqnum, bl), 0);
         Varnode[] outNodes;
         if (function != null && function.getReturn() != null) {
             /// Get possible return nodes by decompiled parameters. 

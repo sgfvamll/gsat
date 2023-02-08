@@ -10,18 +10,16 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.SequenceNumber;
 
+/// A CFGBlock contains a sequence of pcode ops 
+///     occupying a sequence number interval ranged from `start` to `last`. 
 public class CFGBlock implements DAGNode<CFGBlock> {
     int _id;
-    Address address = null;
     private ArrayList<PcodeOp> oplist;
     ArrayList<CFGBlock> cfgIns;
     ArrayList<CFGBlock> cfgOuts;
 
-    private int numSeq = 0;
-
-    /// TODO should fix the numInstChecked to be the number of the delaySlots ? 
-    ///      very strange case, maybe just ignore it. 
-    static private int numInstCheckedToDeterminingAddr = 2;
+    SequenceNumber start = null;
+    SequenceNumber last = null;
 
     public static class IdComparator implements Comparator<CFGBlock> {
         public int compare(CFGBlock o1, CFGBlock o2) {
@@ -48,7 +46,12 @@ public class CFGBlock implements DAGNode<CFGBlock> {
     }
 
     CFGBlock(Address nodeStartEa, int speculativeNumInsts) {
-        address = nodeStartEa;
+        this(new SequenceNumber(nodeStartEa, 0), speculativeNumInsts);
+    }
+
+    CFGBlock(SequenceNumber seqnum, int speculativeNumInsts) {
+        assert seqnum != null;
+        start = seqnum;
         oplist = new ArrayList<>(speculativeNumInsts);
         cfgIns = new ArrayList<>();
         cfgOuts = new ArrayList<>();
@@ -80,17 +83,20 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         return last;
     }
 
+    // SequenceNumber.equals only check the equivalence of the (Address, uniq) tuple. 
     void append(PcodeOp pcodeOp) {
-        if (pcodeOp.getSeqnum() != null)
-            pcodeOp.getSeqnum().setOrder(numSeq++);
+        SequenceNumber opSeqnum = pcodeOp.getSeqnum();
+        if (opSeqnum != last && !opSeqnum.equals(last)) {
+            opSeqnum.setOrder(numSeq());
+            last = opSeqnum;
+        }
         oplist.add(pcodeOp);
     }
 
     public void truncateOpList(int endIdx) {
         for (int i = oplist.size() - 1; i >= endIdx; i--) {
             PcodeOp op = oplist.remove(i);
-            if (op.getSeqnum() != null)
-                numSeq--;
+            last = op.getSeqnum();
         }
     }
 
@@ -105,7 +111,7 @@ public class CFGBlock implements DAGNode<CFGBlock> {
     }
 
     public int numSeq() {
-        return numSeq;
+        return last == null ? 0 : last.getOrder() + 1;
     }
 
     void linkOut(CFGBlock bl) {
@@ -132,95 +138,26 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         cfgOuts.clear();
     }
 
-    /// ??? 
     public Address getAddress() {
-        assert address != null || !oplist.isEmpty();
-        if (address == null)
-            address = getMinAddress();
-        return address;
+        return start.getTarget();
     }
 
-    /// Warning, first op seqnum may not be the least seqnum 
-    /// Considering delay slots. 
+    /// Warning, Considering delay slots? 
     public SequenceNumber getStartSeqNum() {
-        SequenceNumber seqnum = null;
-        if (!oplist.isEmpty()) {
-            seqnum = oplist.get(0).getSeqnum();
-        }
-        if (seqnum == null && address != null)
-            seqnum = new SequenceNumber(address, 0);
-        assert seqnum != null;
-        return seqnum;
+        return start;
     }
 
-    /// Warning, first op seqnum may not be the least seqnum 
-    /// Considering delay slots. 
-    public SequenceNumber getLastOpSeqNum() {
-        if (numSeq == 0) {
-            return new SequenceNumber(address, 0);
-        } else { // There are numSeq ops whose seqnums are not null. 
-            int i = oplist.size() - 1;
-            while (oplist.get(i).getSeqnum() == null)
-                i--;
-            return oplist.get(i).getSeqnum();
-        }
-    }
-
-    public Address getMinAddress() {
-        int opIdx = 0, numInstChecked = 0;
-        SequenceNumber opSeq = oplist.get(opIdx).getSeqnum();
-        Address minAddr = opSeq.getTarget();
-        int checkLimit = numInstCheckedToDeterminingAddr;
-        while (opIdx > 0 && numInstChecked < checkLimit) {
-            numInstChecked += opSeq.getTime() == 0 ? 1 : 0;
-            opSeq = oplist.get(++opIdx).getSeqnum();
-            if (opSeq.getTarget().getOffset() < minAddr.getOffset()) {
-                minAddr = opSeq.getTarget();
-            }
-        }
-        return minAddr;
-    }
-
-    public Address getMaxAddress() {
-        int opIdx = oplist.size() - 1, numInstChecked = 0;
-        SequenceNumber opSeq = oplist.get(opIdx).getSeqnum();
-        Address maxAddr = opSeq.getTarget();
-        int checkLimit = numInstCheckedToDeterminingAddr;
-        while (opIdx > 0 && numInstChecked < checkLimit) {
-            numInstChecked += opSeq.getTime() == 0 ? 1 : 0;
-            opSeq = oplist.get(--opIdx).getSeqnum();
-            if (opSeq.getTarget().getOffset() > maxAddr.getOffset()) {
-                maxAddr = opSeq.getTarget();
-            }
-        }
-        return maxAddr;
-    }
-
-    public boolean containingAddress(Address target) {
-        if (target.getOffset() < address.getOffset())
-            return false;
-        if (target.getOffset() > getMaxAddress().getOffset())
-            return false;
-        return true;
+    /// Warning, considering delay slots? 
+    public SequenceNumber getLastSeqNum() {
+        return last == null ? start : last;
     }
 
     public boolean containingSeqNum(SequenceNumber seqnum) {
-        for (PcodeOp op : oplist) {
-            if (op.getSeqnum() != null && op.getSeqnum().equals(seqnum))
-                return true;
-        }
-        return false;
+        return getOpIdxFromSeqnum(seqnum) != -1;
     }
 
     public boolean startsAt(SequenceNumber seqnum) {
-        if (oplist.size() == 0)
-            return seqnum.getTime() == 0 && seqnum.getTarget().equals(address);
-        assert oplist.get(0).getSeqnum() != null;
-        return oplist.get(0).getSeqnum().equals(seqnum);
-    }
-
-    public boolean startsAt(Address target) {
-        return getAddress().equals(target);
+        return getStartSeqNum().equals(start);
     }
 
     public List<CFGBlock> getPredecessors() {
@@ -240,38 +177,35 @@ public class CFGBlock implements DAGNode<CFGBlock> {
     }
 
     public int getOpIdxFromOrder(int opOrder) {
-        int numOps = oplist.size();
-        for (int i = opOrder; i < numOps; i++) {
+        for (int i = opOrder; i < oplist.size(); i++) {
             SequenceNumber opSeqnum = oplist.get(i).getSeqnum();
-            if (opSeqnum != null && opSeqnum.getOrder() == opOrder)
+            if (opSeqnum.getOrder() == opOrder)
                 return i;
         }
         return -1;
     }
 
     public int getOpIdxFromSeqnum(SequenceNumber seqnum) {
-        int numOps = oplist.size(), opIdx = -1;
-        for (int i = 0; i < numOps; i++) {
-            SequenceNumber opSeqnum = oplist.get(i).getSeqnum();
-            if (opSeqnum != null && opSeqnum.equals(seqnum)) {
-                opIdx = i;
-                break;
-            }
+        for (int i = 0; i < oplist.size(); i++) {
+            if (oplist.get(i).getSeqnum().equals(seqnum))
+                return i;
         }
-        return opIdx;
+        return -1;
     }
 
     public int getOpIdxFromAddress(Address splitAddr) {
         return getOpIdxFromSeqnum(new SequenceNumber(splitAddr, 0));
     }
 
-    /// Maybe we should ensure that the splitting is only allowed 
-    ///     when the first op of the new block has a no null seqnum. 
+    /// We should ensure that the splitting is only allowed 
+    ///     when the first op of the new block starts a new opOrder.  
     /// That is, we should split by the opOrder rather than the opIdx. 
     public CFGBlock splitAt(int opIdx) {
         int numOps = oplist.size();
+        SequenceNumber newStart = oplist.get(opIdx).getSeqnum();
         assert opIdx > 0 && opIdx < numOps;
-        CFGBlock newBl = new CFGBlock(null, numOps - opIdx);
+        assert !oplist.get(opIdx - 1).getSeqnum().equals(newStart);
+        CFGBlock newBl = new CFGBlock(newStart, numOps - opIdx);
         for (int i = opIdx; i < numOps; i++) {
             newBl.append(oplist.get(i));
         }
