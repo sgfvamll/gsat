@@ -17,7 +17,7 @@ public class SoNGraphBuilder {
     Set<CFGBlock> processed = new HashSet<>();
     SoNNode end = SoNNode.newEnd();
     List<SoNNode> regions;
-    List<DefState> phiDefs;
+    List<SemiDefState> phiDefs;
 
     GraphFactory graphFactory;
     CFGFunction cfgFunction;
@@ -72,6 +72,10 @@ public class SoNGraphBuilder {
 
         public Set<Map.Entry<AddressInterval, V>> entrySet() {
             return state.entrySet();
+        }
+
+        protected SoNNode handleSubPiece(SoNNode input, int outSize, long offset) {
+            return SoNNode.newProject(input, outSize, offset);
         }
 
         protected abstract SoNNode handleUndefined(AddressInterval interval);
@@ -131,11 +135,9 @@ public class SoNGraphBuilder {
                 long intersectedLen = intersected.getLength();
                 long offset = intersectedMin.subtract(entry.getKey().getMinAddress());
                 SoNNode project, input = eget(entry);
-                if (intersectedLen != entry.getKey().getLength()) {
-                    project = SoNNode.newProject((int) intersectedLen);
-                    project.setUse(0, input);
-                    project.setUse(1, SoNNode.newConstant(offset, 4));
-                } else
+                if (intersectedLen != entry.getKey().getLength())
+                    project = handleSubPiece(input, (int) intersectedLen, offset);
+                else
                     project = input;
                 subPieces.add(project);
                 requiredRange = requiredRange.removeFromStart(intersectedLen);
@@ -195,9 +197,7 @@ public class SoNGraphBuilder {
                 for (AddressInterval remaining : eKey.substract(intersected)) {
                     long subPieceOffset = remaining.getMinAddress().subtract(eKey.getMinAddress());
                     int subPieceSize = (int) remaining.getLength();
-                    SoNNode subPiece = SoNNode.newProject(subPieceSize);
-                    subPiece.setUse(0, eget(entry));
-                    subPiece.setUse(1, SoNNode.newConstant(subPieceOffset, 4));
+                    SoNNode subPiece = handleSubPiece(eget(entry), subPieceSize, subPieceOffset);
                     newView.add(new Pair<>(remaining, subPiece));
                 }
             }
@@ -267,6 +267,20 @@ public class SoNGraphBuilder {
 
         protected SoNNode remove(AddressInterval interval) {
             return state.remove(interval);
+        }
+    }
+
+    public static class SemiDefState extends DefState {
+        // Sizes of defined SoN nodes are flex and no subpieces needed. 
+        //      This is why the word 'semi-def' is used. 
+        @Override
+        protected SoNNode handleSubPiece(SoNNode input, int outSize, long offset) {
+            return new SoNNode(input);
+        }
+
+        @Override
+        public SoNNode peek(AddressInterval requiredRange) {
+            return state.get(requiredRange);
         }
     }
 
@@ -357,9 +371,9 @@ public class SoNGraphBuilder {
 
     private void buildRegions() {
         regions = new ArrayList<>(nodes.size());
-        phiDefs = new ArrayList<DefState>(nodes.size());
+        phiDefs = new ArrayList<SemiDefState>(nodes.size());
         for (CFGBlock n : nodes) {
-            phiDefs.add(new DefState());
+            phiDefs.add(new SemiDefState());
             /// Init Region Nodes. 
             PcodeOp last = n.getLastOp();
             assert !n.isReturnBlock() || last.getOpcode() == PcodeOp.RETURN;

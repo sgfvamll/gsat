@@ -19,15 +19,23 @@ public class SoNNode implements DAGNode<SoNNode> {
 
     private int id;
     private int numControlUSe = 0, numEffectUse = 0;
-    private BaseOp op;
+    private BaseOp op; // op is allowed to be shared by multiple nodes and should be immutable. 
     List<SoNNode> uses;
 
-    SoNNode(BaseOp operation, int initUses) {
+    public SoNNode(BaseOp operation, int initUses) {
         id = idCnt++;
         op = operation;
         uses = new ArrayList<>(initUses);
         for (int i = 0; i < initUses; i++)
             uses.add(null);
+    }
+
+    public SoNNode(SoNNode node) {
+        this(node.op, node.uses.size());
+        for (int i = 0; i < node.uses.size(); i++)
+            uses.set(i, node.uses.get(i));
+        numControlUSe = node.numControlUSe;
+        numEffectUse = node.numEffectUse;
     }
 
     private SoNNode(int opc, int initUses) {
@@ -212,6 +220,13 @@ public class SoNNode implements DAGNode<SoNNode> {
     public static SoNNode newProject(int outSize) {
         BaseOp op = new Project(outSize);
         return new SoNNode(op, 2);
+    }
+
+    public static SoNNode newProject(SoNNode input, int outSize, long offset) {
+        SoNNode project = SoNNode.newProject(outSize);
+        project.setUse(0, input);
+        project.setUse(1, SoNNode.newConstant(offset, 8));
+        return project;
     }
 
     public static SoNNode newPiece(int numDataUses) {
