@@ -20,6 +20,8 @@ public class PCodeExtractorV2 extends BaseTool {
     String cfgFilePath;
     String outputFormat;
     int verbose_level = 0;
+    int extraction_mode = 0;
+    String debugged_func;
 
     public PCodeExtractorV2() {
         this.analysisMode = 1; /// Fast analysis
@@ -32,6 +34,8 @@ public class PCodeExtractorV2 extends BaseTool {
     @Override
     Option[] getOptions() {
         return new Option[] {
+                new Option("pm", "extraction_mode", true, "{default, debug_one}"),
+                new Option("va", "function_vaddress", true, "The function to be dumpped. "),
                 new Option("c", "cfg_file", true,
                         "Path to a json file that contains all selected functions along with its CFG (i.e. *_cfg_disasm.json). "),
                 new Option("of", "output_format", true, "One of {'ACFG', 'SoN', 'tSoN'}"),
@@ -49,6 +53,13 @@ public class PCodeExtractorV2 extends BaseTool {
         }
         if (commandLine.hasOption("verbose_level"))
             verbose_level = Integer.parseInt(commandLine.getOptionValue("verbose_level"), 10);
+        if (commandLine.hasOption("extraction_mode")) {
+            String mode = commandLine.getOptionValue("extraction_mode");
+            if (mode.equals("debug_one")) {
+                extraction_mode = 1;
+            }
+            debugged_func = commandLine.getOptionValue("function_vaddress");
+        }
         return true;
     }
 
@@ -70,9 +81,22 @@ public class PCodeExtractorV2 extends BaseTool {
         return program.getImageBase().getOffset() - orgImageBase;
     }
 
+    private void dumpOneFunc(JSONObject oneCfgJson) {
+        GraphFactory graphFactory = new GraphFactory(program);
+        CFGFunction cfgFunction = graphFactory.constructCfgProgramFromJsonInfo(oneCfgJson);
+        String dumppedCfgFunction = graphFactory.debugCfgFunction(cfgFunction);
+        if (outputFile != null) {
+            CommonUtils.writeString(dumppedCfgFunction, outputFile);
+            ColoredPrint.info("[*] Results saved at %s", outputFile);
+        } else {
+            System.console().printf(dumppedCfgFunction);
+        }
+    }
+
     @Override
     public Boolean run() {
-        AnalysisHelper.doDecompilerParameterIDAnalysis(program);
+        if (analysisMode != 0)
+            AnalysisHelper.doDecompilerParameterIDAnalysis(program);
 
         JSONObject cfgJson = new JSONObject(CommonUtils.readFile(cfgFilePath));
         String idb_path = cfgJson.keys().next();
@@ -90,6 +114,18 @@ public class PCodeExtractorV2 extends BaseTool {
         }
         if (offset != 0) {
             AnalysisHelper.rebaseProgram(program, program.getImageBase().add(-offset));
+        }
+
+        if (extraction_mode == 1) {
+            for (var oneCfgInfo : cfgInfos) {
+                JSONObject oneCfgJson = (JSONObject) oneCfgInfo;
+                String startEa = (String) oneCfgJson.get("start_ea");
+                if (!debugged_func.equals(startEa)) 
+                    continue;
+                dumpOneFunc(oneCfgJson);
+                break;
+            }
+            return true;
         }
 
         GraphFactory graphFactory = new GraphFactory(program);

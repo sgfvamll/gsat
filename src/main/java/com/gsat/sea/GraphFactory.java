@@ -253,6 +253,25 @@ public class GraphFactory {
         return funcOut;
     }
 
+    public String debugCfgFunction(CFGFunction cfgFunction) {
+        String result = String.format("[=] fva: 0x%x\n", cfgFunction.getAddress().getOffset());
+        for (CFGBlock bl : cfgFunction.getBlocks()) {
+            result += String.format("ID: %d. ADDR: 0x%x\n", bl.id(), bl.getAddress().getOffset());
+            result += "Preds: ";
+            for (CFGBlock pred: bl.getPredecessors()) 
+                result += String.format("%d, ", pred.id());
+            result += "\nSuccs: ";
+            for (CFGBlock succ: bl.getSuccessors()) 
+                result += String.format("%d, ", succ.id());
+            result += "\n";
+            for (PcodeOp op : bl.getPcodeOps()) {
+                result += String.format("%s:\t%s\n", op.getSeqnum().toString(), op.toString());
+            }
+            result += "\n";
+        }
+        return result;
+    }
+
     Varnode[] getReturnVarnodes(Function function) {
         if (function == null || function.getReturn() == null)
             return new Varnode[0];
