@@ -380,6 +380,8 @@ public class SoNGraphBuilder {
             SoNNode controlNode = SoNNode.newRegion(last);
             regions.add(controlNode);
         }
+        SoNNode start = SoNNode.newBrRegion(0);
+        regions.get(0).addControlUse(start);
     }
 
     private void insertPhiNodes(List<Set<Integer>> domfrontsets) {
