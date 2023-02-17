@@ -128,6 +128,7 @@ public class PCodeExtractorV2 extends BaseTool {
             return true;
         }
 
+        long startTime=System.currentTimeMillis();
         GraphFactory graphFactory = new GraphFactory(program);
         JSONObject binOut = new JSONObject();
         for (var oneCfgInfo : cfgInfos) {
@@ -146,6 +147,9 @@ public class PCodeExtractorV2 extends BaseTool {
             }
             binOut.putOpt((String) oneCfgJson.get("start_ea"), dumppedGraph);
         }
+        long endTime=System.currentTimeMillis();
+        ColoredPrint.info(
+            String.format("Time for extraction: %d secs. ", (endTime-startTime)/1000) );
 
         JSONObject binOutWrap = new JSONObject();
         binOutWrap.put(idb_path, binOut);
