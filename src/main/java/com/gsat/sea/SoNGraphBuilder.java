@@ -481,8 +481,8 @@ public class SoNGraphBuilder {
         if (bl.isReturnBlock()) {
             assert blRegion.op() instanceof ReturnRegion;
             assert blRegion.getUses().size() > 1;
+            blRegion.addEffectUse(state.peekOrNew(effectNode)); // Link the last EFFECT node to RETURN
             end.addControlUse(blRegion); // Link RETURN-s to END
-            end.addEffectUse(state.peekOrNew(effectNode)); // Link last EFFECT node to END
         }
         /// Process region control inputs
         for (CFGBlock pred : bl.getPredecessors()) {
