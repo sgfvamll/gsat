@@ -164,7 +164,12 @@ def randAbs(low, high):
 
 if __name__ == "__main__":
     graph_fp = sys.argv[1]
-    size_limit = int(sys.argv[2])
+    filter_rule = sys.argv[2]
+    specified_func = size_limit = None
+    if filter_rule.startswith("0x"):
+        specified_func = sys.argv[2]
+    else:
+        size_limit = int(sys.argv[2])
     with open(graph_fp, "r") as f:
         graph_data = json.load(f)
     graph_data = graph_data[list(graph_data.keys())[0]]
@@ -174,7 +179,9 @@ if __name__ == "__main__":
         edges = func_data['edges']
         if len(nodes) < min_nodes:
             min_nodes = len(nodes)
-        if len(nodes) > size_limit:
+        if size_limit is not None and len(nodes) > size_limit:
+            continue
+        if specified_func is not None and specified_func!=fva:
             continue
 
         graph = create_graph(nodes, edges)
@@ -197,7 +204,7 @@ if __name__ == "__main__":
         pos = nx.multipartite_layout(graph)
         for nid, npos in pos.items():
             npos[0] *= -1
-            # npos += np.array([randAbs(0.02, 0.07), randAbs(0.02, 0.07)])
+            npos += np.array([randAbs(0.02, 0.07), randAbs(0.02, 0.07)])
         # pos = nx.spring_layout(graph, k=10, pos = pos, seed=42, iterations=10)
         pos = kamada_kawai_layout(
             graph, pos=pos, dist=shortest_paths_dict, weight=None)
