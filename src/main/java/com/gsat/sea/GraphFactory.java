@@ -41,6 +41,7 @@ public class GraphFactory {
             "NewUnique", 32, AddressSpace.TYPE_UNIQUE, 0x329);
     Program program;
     AddressSpace constantSpace;
+    AddressSpace stackBaseSpace;
     long uniqueOffset = 0;
 
     Varnode[] possibleReturnVarnodes;
@@ -49,11 +50,17 @@ public class GraphFactory {
     /// When inserting RETURN op (e.g. handling tail call), use this as the return address. 
     Varnode defaultReturnAddress;
 
+    Varnode stackPointer;
+
     public GraphFactory(Program program) {
         this.program = program;
         constantSpace = program.getAddressFactory().getConstantSpace();
 
         PrototypeModel defaultCC = program.getCompilerSpec().getDefaultCallingConvention();
+
+        Register spReg = program.getCompilerSpec().getStackPointer();
+        stackPointer = new Varnode(spReg.getAddress(), spReg.getNumBytes());
+        stackBaseSpace = program.getCompilerSpec().getStackBaseSpace();
 
         /// Determine default varnodes where call args are placed. 
         List<Varnode> possibleCallArgList = new ArrayList<>();
@@ -258,10 +265,10 @@ public class GraphFactory {
         for (CFGBlock bl : cfgFunction.getBlocks()) {
             result += String.format("ID: %d. ADDR: 0x%x\n", bl.id(), bl.getAddress().getOffset());
             result += "Preds: ";
-            for (CFGBlock pred: bl.getPredecessors()) 
+            for (CFGBlock pred : bl.getPredecessors())
                 result += String.format("%d, ", pred.id());
             result += "\nSuccs: ";
-            for (CFGBlock succ: bl.getSuccessors()) 
+            for (CFGBlock succ : bl.getSuccessors())
                 result += String.format("%d, ", succ.id());
             result += "\n";
             for (PcodeOp op : bl.getPcodeOps()) {
@@ -306,12 +313,25 @@ public class GraphFactory {
     /// Data uses of stack / memory storage should be loadded first. 
     Varnode adaptVarnode(Varnode varnode, SequenceNumber seqnum, CFGBlock bl) {
         Address addr = varnode.getAddress();
-        if (addr.isStackAddress() || addr.isMemoryAddress()) {
+        if (addr.isMemoryAddress()) {
             /// New Load PcodeOp
-            Varnode spaceIdC = newStore(varnode.getSpace());
-            PcodeOp load = new PcodeOp(seqnum, PcodeOp.LOAD,
-                    new Varnode[] { spaceIdC, varnode }, newUnique(varnode.getSize()));
-            bl.append(load);
+            Varnode space = newStore(varnode.getSpace());
+            Varnode ptr = newConstant(varnode.getOffset(), varnode.getSize());
+            Varnode out = newUnique(varnode.getSize());
+            bl.append(new PcodeOp(seqnum, PcodeOp.LOAD, new Varnode[] { space, ptr }, out));
+            varnode = out;
+        } else if (addr.isStackAddress()) {
+            Varnode space = newStore(stackBaseSpace.getSpaceID());
+            Varnode ptr, out = newUnique(varnode.getSize());
+            if (varnode.getOffset() != 0) {
+                Varnode offset = newConstant(varnode.getOffset(), stackPointer.getSize());
+                ptr = newUnique(stackPointer.getSize());
+                bl.append(new PcodeOp(seqnum, PcodeOp.INT_ADD, new Varnode[] { stackPointer, offset }, ptr));
+            } else {
+                ptr = stackPointer;
+            }
+            bl.append(new PcodeOp(seqnum, PcodeOp.LOAD, new Varnode[] { space, ptr }, out));
+            varnode = out;
         }
         return varnode;
     }
@@ -372,7 +392,7 @@ public class GraphFactory {
             outNodes = getPossibleReturnVarnodes();
         }
         for (int i = outNodes.length - 1; i >= 0; i--) {
-            op.setInput(outNodes[i], i + 1);
+            op.setInput(adaptVarnode(outNodes[i], seqnum, bl), i + 1);
         }
         if (outNodes.length == 0) {
             /// Void return. 
