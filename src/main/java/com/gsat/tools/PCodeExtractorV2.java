@@ -149,7 +149,7 @@ public class PCodeExtractorV2 extends BaseTool {
         }
         long endTime=System.currentTimeMillis();
         ColoredPrint.info(
-            String.format("Time for extraction: %d secs. ", (endTime-startTime)/1000) );
+            String.format("Time for extraction: %.2f secs. ", (endTime-startTime)/1000.0) );
 
         JSONObject binOutWrap = new JSONObject();
         binOutWrap.put(idb_path, binOut);
