@@ -2,6 +2,7 @@ package com.gsat.sea;
 
 import com.google.common.base.CaseFormat;
 
+import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.pcode.PcodeOp;
 
 public class SoNOp {
@@ -19,7 +20,7 @@ public class SoNOp {
     }
 
     public static boolean hasEffect(int opc) {
-        return isCall(opc) || opc == PcodeOp.STORE;
+        return isCall(opc) || opc == PcodeOp.STORE || opc == PcodeOp.LOAD;
     }
 
     public static boolean hasFallThrough(int opc) {
@@ -36,6 +37,8 @@ public class SoNOp {
             case PcodeOp.BRANCH:
             case PcodeOp.CBRANCH:
             case PcodeOp.MULTIEQUAL: // First use is the region. 
+            case PcodeOp.LOAD:
+            case PcodeOp.STORE:
                 return 1;
             default:
                 return 0;
@@ -89,7 +92,7 @@ public class SoNOp {
                     mnem = mnem.equals("MULTIEQUAL") ? "PHI" : mnem;
                     break;
             }
-            char lastCh = mnem.charAt(mnem.length()-1);
+            char lastCh = mnem.charAt(mnem.length() - 1);
             if (lastCh == 'L')
                 mnem = mnem.replace("EQUAL", "EQ");
             else if (lastCh == 'E')
@@ -141,6 +144,19 @@ public class SoNOp {
         MemorySpace(long spaceId) {
             super(-4);
             id = spaceId;
+        }
+
+        public String mnem() {
+            long type_mask = (1 << AddressSpace.ID_SIZE_SHIFT) - 1;
+            switch ((int) (id & type_mask)) {
+                case AddressSpace.TYPE_RAM:
+                case AddressSpace.TYPE_CODE:
+                    return "MEMORY_SPACE";
+                case AddressSpace.TYPE_STACK:
+                    return "STACK_SPACE";
+                default:
+                    return "OTHER_SPACE";
+            }
         }
 
         public String toString() {
