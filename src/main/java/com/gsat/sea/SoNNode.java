@@ -1,6 +1,7 @@
 package com.gsat.sea;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import com.gsat.sea.SoNOp.*;
@@ -12,13 +13,14 @@ import ghidra.program.model.pcode.Varnode;
 
 public class SoNNode implements DAGNode<SoNNode> {
     static int idCnt = 0;
+    static final int nUsesType = 4;
 
     public static void clearIdCount() {
         idCnt = 0;
     }
 
     private int id;
-    private int numControlUSe = 0, numEffectUse = 0;
+    private int[] numUsesPerType; // 0-data, 1-control, 2-memory effect, 3-other effect
     private BaseOp op; // op is allowed to be shared by multiple nodes and should be immutable. 
     List<SoNNode> uses;
 
@@ -28,14 +30,19 @@ public class SoNNode implements DAGNode<SoNNode> {
         uses = new ArrayList<>(initUses);
         for (int i = 0; i < initUses; i++)
             uses.add(null);
+        numUsesPerType = new int[nUsesType];
+        Arrays.fill(numUsesPerType, 0);
+        numUsesPerType[0] = initUses;
     }
 
     public SoNNode(SoNNode node) {
         this(node.op, node.uses.size());
         for (int i = 0; i < node.uses.size(); i++)
             uses.set(i, node.uses.get(i));
-        numControlUSe = node.numControlUSe;
-        numEffectUse = node.numEffectUse;
+        int nUsesTypes = node.numUsesPerType.length;
+        numUsesPerType = new int[nUsesType];
+        for (int i = 0; i < nUsesTypes; i++)
+            numUsesPerType[i] = node.numUsesPerType[i];
     }
 
     private SoNNode(int opc, int initUses) {
@@ -73,18 +80,12 @@ public class SoNNode implements DAGNode<SoNNode> {
     }
 
     public int getEdgeType(int predSlot) {
-        int numUses = uses.size();
-        int numDataUses = numUses - numControlUSe - numEffectUse;
-        int numDataControlUses = numDataUses + numControlUSe;
-        assert numDataUses >= 0 && numDataControlUses <= numUses;
-        int type = 0;
-        if (predSlot >= 0 && predSlot < numDataUses)
-            type = 1; // Data
-        else if (predSlot >= numDataUses && predSlot < numDataControlUses)
-            type = 2; // Control
-        else if (predSlot >= numDataControlUses && predSlot < numUses)
-            type = 3; // Effect
-        return type;
+        for (int i = 0; i < numUsesPerType.length; i++) {
+            if (predSlot < numUsesPerType[i])
+                return i + 1;
+            predSlot -= numUsesPerType[i];
+        }
+        return 0;
     }
 
     public String[] getFeatureStrs(int opt) {
@@ -102,28 +103,29 @@ public class SoNNode implements DAGNode<SoNNode> {
         uses.set(idx, inp);
     }
 
+    void addUse(int type, SoNNode inp) {
+        assert type < nUsesType && type >= 0;
+        int insertAt = 0;
+        for (int i = 0; i <= type; i++)
+            insertAt += numUsesPerType[i];
+        uses.add(insertAt, inp);
+        numUsesPerType[type] += 1;
+    }
+
     void addDataUse(SoNNode inp) {
-        if (numControlUSe == 0 && numEffectUse == 0)
-            uses.add(inp);
-        else {
-            int numDataUses = uses.size() - numControlUSe - numEffectUse;
-            uses.add(numDataUses, inp);
-        }
+        addUse(0, inp);
     }
 
     void addControlUse(SoNNode inp) {
-        if (numEffectUse == 0) {
-            uses.add(inp);
-        } else {
-            int numDataControlUses = uses.size() - numEffectUse;
-            uses.add(numDataControlUses, inp);
-        }
-        numControlUSe += 1;
+        addUse(1, inp);
     }
 
-    void addEffectUse(SoNNode inp) {
-        numEffectUse += 1;
-        uses.add(inp);
+    void addMemoryEffectUse(SoNNode inp) {
+        addUse(2, inp);
+    }
+
+    void addOtherEffectUse(SoNNode inp) {
+        addUse(3, inp);
     }
 
     public static SoNNode newBaseSoNNodeFromOp(PcodeOp op) {
@@ -207,13 +209,13 @@ public class SoNNode implements DAGNode<SoNNode> {
         return new SoNNode(new ReturnRegion(), numUses);
     }
 
-    public static SoNNode newPhi(SoNNode region, int numUses, boolean effect) {
-        int numDataUses = 1 + (effect ? 0 : numUses);
-        int numEffectUses = effect ? numUses : 0;
+    public static SoNNode newPhi(SoNNode region, int numUses, int type) {
+        int numDataUses = 1 + (type != 0 ? 0 : numUses);
+        int numEffectUses = type != 0 ? numUses : 0;
         SoNNode phi = new SoNNode(new Phi(), numDataUses);
         phi.setUse(0, region);
         for (int i = 0; i < numEffectUses; i++)
-            phi.addEffectUse(null);
+            phi.addUse(type, null);
         return phi;
     }
 

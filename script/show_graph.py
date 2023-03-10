@@ -112,7 +112,7 @@ def create_graph(nodes, edges):
         np.matrix: Numpy adjacency matrix
         list: nodes in the graph
     """
-    G = nx.DiGraph()
+    G = nx.MultiDiGraph()
     for node in nodes:
         G.add_node(node)
     for edge in edges:
@@ -129,14 +129,17 @@ EDGE_STYLE_MAP = {
     1: "-",
     2: "--",
     3: ":",
+    4: "-.", 
 }
 
 CONTROL_NODES = [
     "BR", "CBR", "BRIND", "RET",
+    "BRANCH", "CBRANCH", "BRANCHIND", "RETURN", 
 ]
 
 EFFECT_NODES = [
-    "CALL", "CALLIND", "CALLOTHER", "SD", "SPACE(4f)",
+    "CALL", "CALLIND", "CALLOTHER", "SD", "SPACE(4f)", 
+    "STORE", "LOAD", 
 ]
 
 SPECIAL_NODES = [
@@ -210,9 +213,10 @@ if __name__ == "__main__":
             graph, pos=pos, dist=shortest_paths_dict, weight=None)
 
         nodes = list(graph)
-        edges = list(graph.edges())
+        edges = list(graph.edges(data='type'))
         node_colors = [node_colors[nid] for nid in nodes]
-        edge_styles = [EDGE_STYLE_MAP[graph[u][v]['type']] for u, v in edges]
+        print(edges)
+        edge_styles = [EDGE_STYLE_MAP[ty] for u, v, ty in edges]
         plt.plot()
         nx.draw(graph, pos, labels=labels, node_size=1000,
                 edgelist=edges, style=edge_styles,

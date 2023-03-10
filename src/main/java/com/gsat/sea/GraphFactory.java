@@ -42,6 +42,7 @@ public class GraphFactory {
     Program program;
     AddressSpace constantSpace;
     AddressSpace stackBaseSpace;
+    // AddressSpace memorySpace;
     long uniqueOffset = 0;
 
     Varnode[] possibleReturnVarnodes;
@@ -49,6 +50,7 @@ public class GraphFactory {
 
     /// When inserting RETURN op (e.g. handling tail call), use this as the return address. 
     Varnode defaultReturnAddress;
+    // Varnode defaultMemoryVarnode;
 
     Varnode stackPointer;
 
@@ -61,6 +63,8 @@ public class GraphFactory {
         Register spReg = program.getCompilerSpec().getStackPointer();
         stackPointer = new Varnode(spReg.getAddress(), spReg.getNumBytes());
         stackBaseSpace = program.getCompilerSpec().getStackBaseSpace();
+        // memorySpace = program.getAddressFactory().getDefaultAddressSpace();
+        // defaultMemoryVarnode = new Varnode(storeSpace.getAddress(memorySpace.getSpaceID()), 1);
 
         /// Determine default varnodes where call args are placed. 
         List<Varnode> possibleCallArgList = new ArrayList<>();
@@ -409,8 +413,8 @@ public class GraphFactory {
             Varnode space = op.getInput(0);
             Varnode store = newStore((int) space.getOffset());
             op.setInput(store, 0);
-            if (opc == PcodeOp.STORE)
-                op.setOutput(store);
+            // if (opc == PcodeOp.STORE)
+            //     op.setOutput(store);
             bl.append(op);
         } else if (SoNOp.isCall(opc)) {
             adaptCall(op, bl);

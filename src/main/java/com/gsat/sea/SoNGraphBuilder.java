@@ -23,8 +23,9 @@ public class SoNGraphBuilder {
     CFGFunction cfgFunction;
     List<CFGBlock> nodes;
 
-    /// 0x4f is a invaild spaceId, so will not conflict with normal address spaces. 
-    static Varnode effectNode = new Varnode(GraphFactory.getStoreSpace().getAddress(0x4f), 1);
+    /// 0x4f,0x5f,0x6f are a invaild spaceId-s, so will not conflict with normal address spaces. 
+    static Varnode memoryNode = new Varnode(GraphFactory.getStoreSpace().getAddress(0x51), 1);
+    static Varnode effectNode = new Varnode(GraphFactory.getStoreSpace().getAddress(0x6f), 1);
 
     public static abstract class AbstractDefState<V> {
         /// Defs are orginized as no intersecting intervals (except 'defs' for constants, 
@@ -394,14 +395,17 @@ public class SoNGraphBuilder {
                 if (out == null)
                     continue; /// no data out
                 defsites.computeIfAbsent(out, k -> new HashSet<>()).add(n.id());
-                if (SoNOp.hasEffect(op.getOpcode())) /// effect def
+                if (SoNOp.defineOtherEffect(op.getOpcode())) /// effect def 
                     defsites.computeIfAbsent(effectNode, k -> new HashSet<>()).add(n.id());
+                if (SoNOp.defineMemoryEffect(op.getOpcode()))
+                    defsites.computeIfAbsent(memoryNode, k -> new HashSet<>()).add(n.id());
             }
         }
         /// Inserting phi nodes 
         for (var ndefs : defsites.entrySet()) {
             AddressInterval interval = AddressInterval.fromVarnode(ndefs.getKey());
             Deque<Integer> worklist = new ArrayDeque<>(ndefs.getValue());
+            int sotreSpaceId = GraphFactory.getStoreSpace().getSpaceID();
             while (!worklist.isEmpty()) {
                 Integer n = worklist.pop();
                 for (Integer blId : domfrontsets.get(n)) {
@@ -409,8 +413,9 @@ public class SoNGraphBuilder {
                     if (blPhiDefs.keyCovered(interval))
                         continue;
                     int numPre = nodes.get(blId).getPredecessors().size();
-                    boolean isPhi = ndefs.getKey().equals(effectNode);
-                    blPhiDefs.put(interval, SoNNode.newPhi(regions.get(blId), numPre, isPhi));
+                    int phiType = ndefs.getKey().equals(effectNode) ? 3
+                            : (ndefs.getKey().getSpace() == sotreSpaceId ? 2 : 0);
+                    blPhiDefs.put(interval, SoNNode.newPhi(regions.get(blId), numPre, phiType));
                     if (!ndefs.getValue().contains(blId))
                         worklist.push(blId);
                 }
@@ -463,10 +468,14 @@ public class SoNGraphBuilder {
                 soNNode.setUse(i - dataUseStart, state.peekOrNew(input));
             }
             /// Link effect edges 
-            if (SoNOp.hasEffect(opc)) {
-                soNNode.addEffectUse(state.peekOrNew(effectNode));
+            if (SoNOp.useOtherEffect(opc))
+                soNNode.addOtherEffectUse(state.peekOrNew(effectNode));
+            if (SoNOp.defineOtherEffect(opc))
                 state.put(effectNode, soNNode);
-            }
+            if (SoNOp.useMemoryEffect(opc))
+                soNNode.addMemoryEffectUse(state.peekOrNew(memoryNode));
+            if (SoNOp.defineMemoryEffect(opc))
+                state.put(memoryNode, soNNode);
             /// Update def
             Varnode out = op.getOutput();
             if (out != null) { // Every op has at most one output. 
@@ -481,7 +490,6 @@ public class SoNGraphBuilder {
         if (bl.isReturnBlock()) {
             assert blRegion.op() instanceof ReturnRegion;
             assert blRegion.getUses().size() > 1;
-            blRegion.addEffectUse(state.peekOrNew(effectNode)); // Link the last EFFECT node to RETURN
             end.addControlUse(blRegion); // Link RETURN-s to END
         }
         /// Process region control inputs

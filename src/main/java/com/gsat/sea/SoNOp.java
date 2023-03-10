@@ -19,8 +19,20 @@ public class SoNOp {
         return opc == PcodeOp.BRANCH || opc == PcodeOp.CBRANCH || opc == PcodeOp.BRANCHIND;
     }
 
-    public static boolean hasEffect(int opc) {
+    public static boolean defineMemoryEffect(int opc) {
+        return isCall(opc) || opc == PcodeOp.STORE;
+    }
+
+    public static boolean defineOtherEffect(int opc) {
         return isCall(opc) || opc == PcodeOp.STORE || opc == PcodeOp.LOAD;
+    }
+
+    public static boolean useMemoryEffect(int opc) {
+        return isCall(opc) || opc == PcodeOp.STORE || opc == PcodeOp.LOAD || opc == PcodeOp.RETURN;
+    }
+
+    public static boolean useOtherEffect(int opc) {
+        return isCall(opc) || opc == PcodeOp.STORE || opc == PcodeOp.LOAD || opc == PcodeOp.RETURN;
     }
 
     public static boolean hasFallThrough(int opc) {
