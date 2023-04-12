@@ -244,7 +244,10 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         String[] bbMnems = new String[oplist.size()];
         int idx = 0;
         for (PcodeOp pcode : oplist) {
-            bbMnems[idx++] = pcode.getMnemonic();
+            if (opt > 0)
+                bbMnems[idx++] = pcode.toString();
+            else
+                bbMnems[idx++] = pcode.getMnemonic();
         }
         return bbMnems;
     }

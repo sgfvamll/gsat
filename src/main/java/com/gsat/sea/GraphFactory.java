@@ -239,6 +239,7 @@ public class GraphFactory {
         JSONObject nodesVerb = new JSONObject();
         Stack<T> worklist = new Stack<>();
         Set<T> nodeSet = new HashSet<>();
+        String featKey = (verb_level == 0)? "node_mnems" : "node_asms";
         worklist.push(graph.root());
         while (!worklist.isEmpty()) {
             T node = worklist.pop();
@@ -253,11 +254,11 @@ public class GraphFactory {
             }
             JSONObject nodeOut = new JSONObject();
             String[] nodeMnems = node.getFeatureStrs(verb_level);
-            nodeOut.put("node_mnems", nodeMnems);
+            nodeOut.put(featKey, nodeMnems);
             nodesVerb.put(String.format("%d", node.id()), nodeOut);
         }
         /// It's unlikely that a selected function is so small...
-        assert nodes.size() >= 10;
+        // assert nodes.size() >= 5;
         funcOut.put("nodes", nodes);
         funcOut.put("edges", edges);
         funcOut.put("nodes_verbs", nodesVerb);

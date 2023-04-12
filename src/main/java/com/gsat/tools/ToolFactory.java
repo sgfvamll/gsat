@@ -73,7 +73,8 @@ public class ToolFactory {
     try {
       commandLine = parser.parse(options,args);
     } catch (Exception e) {
-        formatter.printHelp(
+      ColoredPrint.error(e.toString());
+      formatter.printHelp(
           String.format("gsat %s [options] target", args[0]), options, false);
         return null;
     }
