@@ -395,8 +395,8 @@ public class SoNGraphBuilder {
                 if (out == null)
                     continue; /// no data out
                 defsites.computeIfAbsent(out, k -> new HashSet<>()).add(n.id());
-                if (SoNOp.defineOtherEffect(op.getOpcode())) /// effect def 
-                    defsites.computeIfAbsent(effectNode, k -> new HashSet<>()).add(n.id());
+                // if (SoNOp.defineOtherEffect(op.getOpcode())) /// effect def 
+                //     defsites.computeIfAbsent(effectNode, k -> new HashSet<>()).add(n.id());
                 if (SoNOp.defineMemoryEffect(op.getOpcode()))
                     defsites.computeIfAbsent(memoryNode, k -> new HashSet<>()).add(n.id());
             }
@@ -468,10 +468,10 @@ public class SoNGraphBuilder {
                 soNNode.setUse(i - dataUseStart, state.peekOrNew(input));
             }
             /// Link effect edges 
-            if (SoNOp.useOtherEffect(opc))
-                soNNode.addOtherEffectUse(state.peekOrNew(effectNode));
-            if (SoNOp.defineOtherEffect(opc))
-                state.put(effectNode, soNNode);
+            // if (SoNOp.useOtherEffect(opc))
+            //     soNNode.addOtherEffectUse(state.peekOrNew(effectNode));
+            // if (SoNOp.defineOtherEffect(opc))
+            //     state.put(effectNode, soNNode);
             if (SoNOp.useMemoryEffect(opc))
                 soNNode.addMemoryEffectUse(state.peekOrNew(memoryNode));
             if (SoNOp.defineMemoryEffect(opc))
