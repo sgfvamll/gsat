@@ -113,6 +113,7 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
             current = entry.getValue();
         }
         int opIdx = current.getOpIdxFromOrder(orderOffset);
+        assert opIdx != -1;
         return new OpSite(current, opIdx);
     }
 

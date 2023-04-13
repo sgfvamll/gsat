@@ -94,10 +94,9 @@ public class CFGBlock implements DAGNode<CFGBlock> {
     }
 
     public void truncateOpList(int endIdx) {
-        for (int i = oplist.size() - 1; i >= endIdx; i--) {
-            PcodeOp op = oplist.remove(i);
-            last = op.getSeqnum();
-        }
+        for (int i = oplist.size() - 1; i >= endIdx; i--) 
+            oplist.remove(i);
+        last = endIdx > 0 ? getLastOp().getSeqnum() : null;
     }
 
     /// Returned oplist should be readonly. That is, no inserting, deleting etc.. 
