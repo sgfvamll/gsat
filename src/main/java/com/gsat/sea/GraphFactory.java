@@ -165,7 +165,58 @@ public class GraphFactory {
         return new PcodeOp(address, 0, PcodeOp.COPY, new Varnode[] { inout }, inout);
     }
 
-    public CFGFunction constructCfgProgramFromJsonInfo(JSONObject cfgInfo) {
+    public CFGFunction constructCfgProgramFromCFGSummary(JSONObject cfgInfo) {
+        if (cfgInfo.has("nodes"))
+            return constructCfgProgramFromCFGSummaryV2(cfgInfo);
+        else
+            return constructCfgProgramFromCFGSummaryV1(cfgInfo);
+    }
+
+    public CFGFunction constructCfgProgramFromCFGSummaryV1(JSONObject cfgInfo) {
+        AddressFactory addressFactory = program.getAddressFactory();
+        Address fva = addressFactory.getAddress(cfgInfo.getString("start_ea"));
+        Address endva = addressFactory.getAddress(cfgInfo.getString("end_ea"));
+        Address maxva = endva.subtract(1);
+        AddressSet body = addressFactory.getAddressSet(fva, maxva);
+
+        Function function = getFunctionAt(fva);
+        AnalysisHelper.disasmBody(program, body, false);
+
+        CFGFunctionBuilder builder = new CFGFunctionBuilder(fva, function);
+        CFGBlock cfgBlock = new CFGBlock(fva, (int) body.getNumAddresses());
+        builder.append(cfgBlock);
+
+        Instruction inst = program.getListing().getInstructionAt(fva);
+        if (inst == null) {
+            ColoredPrint.warning("Disasm inst at %x failed. NOP filled. ", fva.getOffset());
+            adaptOp(newNop(fva), cfgBlock, function);
+            inst = program.getListing().getInstructionAfter(fva);
+        }
+        Address instAddr = inst != null ? inst.getAddress() : null;
+        while (inst != null && body.contains(instAddr)) {
+            /// inst.getPcode() will not only get the corresponding pcode ops of this instruction 
+            ///     but also merge the pcodes of instuctions resided in its delay slots. 
+            /// Example: 00402e94 - bne xxx; 00402e98 - sb xxx. 
+            /// inst = `bne xxx`; inst.getPcode() will return the pcodes corresponding to `sb xxx; bne xxx;`. 
+            /// And inst.getFallThrough() will return 00402e9C. 
+            PcodeOp[] oplist = inst.getPcode();
+            for (PcodeOp op : oplist) {
+                adaptOp(op, cfgBlock, function);
+            }
+            if (oplist.length == 0) { // Placeholder to fill gaps. Gaps inside a block may confuse further analysis. 
+                adaptOp(newNop(instAddr), cfgBlock, function);
+            }
+            inst = program.getListing().getInstructionAfter(instAddr);
+            if (inst != null)
+                instAddr = inst.getAddress();
+        }
+
+        builder.fixFlow();
+        builder.resolveTailBranches(this);
+        return builder.finalizeFuncion();
+    }
+
+    public CFGFunction constructCfgProgramFromCFGSummaryV2(JSONObject cfgInfo) {
         AddressFactory addressFactory = program.getAddressFactory();
         Address fva = addressFactory.getAddress(cfgInfo.getString("start_ea"));
         JSONArray nodes = cfgInfo.getJSONArray("nodes");

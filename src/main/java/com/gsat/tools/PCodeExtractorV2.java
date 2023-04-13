@@ -79,11 +79,11 @@ public class PCodeExtractorV2 extends BaseTool {
         String orgImageBaseStr = props.getString(ElfLoader.ELF_ORIGINAL_IMAGE_BASE_PROPERTY, "0x0");
         long orgImageBase = Long.decode(orgImageBaseStr);
         return program.getImageBase().getOffset() - orgImageBase;
-    }
+    } 
 
     private void dumpOneFunc(JSONObject oneCfgJson) {
         GraphFactory graphFactory = new GraphFactory(program);
-        CFGFunction cfgFunction = graphFactory.constructCfgProgramFromJsonInfo(oneCfgJson);
+        CFGFunction cfgFunction = graphFactory.constructCfgProgramFromCFGSummary(oneCfgJson);
         String dumppedCfgFunction = graphFactory.debugCfgFunction(cfgFunction);
         if (outputFile != null) {
             CommonUtils.writeString(dumppedCfgFunction, outputFile);
@@ -134,7 +134,7 @@ public class PCodeExtractorV2 extends BaseTool {
         for (var oneCfgInfo : cfgInfos) {
             graphFactory.clearState();
             JSONObject oneCfgJson = (JSONObject) oneCfgInfo;
-            CFGFunction cfgFunction = graphFactory.constructCfgProgramFromJsonInfo(oneCfgJson);
+            CFGFunction cfgFunction = graphFactory.constructCfgProgramFromCFGSummary(oneCfgJson);
             JSONObject dumppedGraph = null;
             switch (outputFormat) {
                 case "ACFG":
