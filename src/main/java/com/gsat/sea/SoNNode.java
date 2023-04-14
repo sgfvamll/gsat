@@ -128,7 +128,7 @@ public class SoNNode implements DAGNode<SoNNode> {
         addUse(3, inp);
     }
 
-    public static SoNNode newBaseSoNNodeFromOp(PcodeOp op) {
+    public static SoNNode newSoNNodeFromOp(PcodeOp op) {
         int opc = op.getOpcode();
         SoNNode result;
         switch (opc) {

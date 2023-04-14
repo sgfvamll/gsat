@@ -13,15 +13,21 @@ import ghidra.program.model.pcode.Varnode;
 
 public class CFGFunction implements DAGGraph<CFGBlock> {
     Address fva;
+    boolean rawPcode;
     List<CFGBlock> blocks;
 
-    CFGFunction(Address start, List<CFGBlock> nodes) {
+    CFGFunction(Address start, List<CFGBlock> nodes, boolean useRawPcode) {
         fva = start;
         blocks = nodes;
+        rawPcode = useRawPcode;
     }
 
     public Address getAddress() {
         return fva;
+    }
+
+    public boolean useRawPcode() {
+        return rawPcode;
     }
 
     public CFGBlock root() {

@@ -1,12 +1,14 @@
 package com.gsat.sea;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Comparator;
 import java.util.ArrayList;
 
 import com.gsat.sea.analysis.DAGNode;
 
 import ghidra.program.model.address.Address;
+import ghidra.program.model.pcode.PcodeBlockBasic;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.SequenceNumber;
 
@@ -93,14 +95,50 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         oplist.add(pcodeOp);
     }
 
+    public static SequenceNumber getPcodeBlockStart(PcodeBlockBasic bb) {
+        SequenceNumber start = bb.getIterator().hasNext() ? bb.getIterator().next().getSeqnum()
+        : new SequenceNumber(bb.getStart(), 0);
+        return start;
+    }
+
+    public void initFlowFromPcodeBlock(Map<SequenceNumber, CFGBlock> blockMap, PcodeBlockBasic bb) {
+        CFGBlock frbl = this;
+        for (int i = 0; i < bb.getOutSize(); i++) {
+            var out = (PcodeBlockBasic) bb.getOut(i);
+            CFGBlock tobl = blockMap.get(getPcodeBlockStart(out));
+            frbl.cfgOuts.add(tobl);
+        }
+        for (int i=0;i<bb.getInSize();i++) {
+            var in = (PcodeBlockBasic) bb.getIn(i);
+            CFGBlock tobl = blockMap.get(getPcodeBlockStart(in));
+            frbl.cfgIns.add(tobl);
+        }
+    }
+
     public void truncateOpList(int endIdx) {
-        for (int i = oplist.size() - 1; i >= endIdx; i--) 
+        for (int i = oplist.size() - 1; i >= endIdx; i--)
             oplist.remove(i);
         last = endIdx > 0 ? getLastOp().getSeqnum() : null;
     }
 
-    /// Returned oplist should be readonly. That is, no inserting, deleting etc.. 
-    /// But modify the op inside it is allowed. 
+    public void removePhiOps() {
+        int i = 0;
+        for (; i < oplist.size(); i++)
+            if (oplist.get(i).getOpcode() != PcodeOp.MULTIEQUAL)
+                break;
+        if (i == 0)
+            return;
+        int orderOff = oplist.get(i).getSeqnum().getOrder();
+        for (int j = i; j < oplist.size(); j++) {
+            PcodeOp op = oplist.get(j);
+            oplist.set(j - i, op);
+            op.setOrder(op.getSeqnum().getOrder() - orderOff);
+        }
+        truncateOpList(oplist.size() - i);
+    }
+
+    /// Returned oplist should be readonly. That is, no inserting, deleting etc..
+    /// But modify the op inside it is allowed.
     public List<PcodeOp> getPcodeOps() {
         return oplist;
     }
@@ -141,12 +179,12 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         return start.getTarget();
     }
 
-    /// Warning, Considering delay slots? 
+    /// Warning, Considering delay slots?
     public SequenceNumber getStartSeqNum() {
         return start;
     }
 
-    /// Warning, considering delay slots? 
+    /// Warning, considering delay slots?
     public SequenceNumber getLastSeqNum() {
         return last == null ? start : last;
     }
@@ -196,9 +234,9 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         return getOpIdxFromSeqnum(new SequenceNumber(splitAddr, 0));
     }
 
-    /// We should ensure that the splitting is only allowed 
+    /// We should ensure that the splitting is only allowed
     ///     when the first op of the new block starts a new opOrder.  
-    /// That is, we should split by the opOrder rather than the opIdx. 
+    /// That is, we should split by the opOrder rather than the opIdx.
     public CFGBlock splitAt(int opIdx) {
         int numOps = oplist.size();
         SequenceNumber newStart = oplist.get(opIdx).getSeqnum();

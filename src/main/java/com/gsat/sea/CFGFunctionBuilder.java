@@ -41,7 +41,14 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
     public CFGBlock root() {
         if (root != null)
             return root;
-        return blocks.get(new SequenceNumber(fva, 0));
+        for (var bl: blocks.values()) {
+            if (bl.getAddress().equals(fva))
+                return bl;
+        }
+        for (var bl: blocks.values())
+            if (bl.getAddress().compareTo(fva) >= 0)
+                return bl;
+        return null;
     }
 
     public void append(CFGBlock bl) {
@@ -65,8 +72,8 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
         return result;
     }
 
-    public CFGFunction finalizeFuncion() {
-        return new CFGFunction(fva, getBlocks());
+    public CFGFunction finalizeFuncion(boolean use_raw_pcode) {
+        return new CFGFunction(fva, getBlocks(), use_raw_pcode);
     }
 
     public int getNumBlocks() {

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.Stack;
 
+import org.apache.commons.lang3.ObjectUtils.Null;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -15,9 +16,15 @@ import com.gsat.sea.analysis.DAGGraph;
 import com.gsat.sea.analysis.DAGNode;
 import com.gsat.utils.ColoredPrint;
 
+import ghidra.app.cmd.disassemble.DisassembleCommand;
+import ghidra.app.cmd.function.CreateFunctionCmd;
+import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileOptions;
+import ghidra.app.decompiler.DecompileResults;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressFactory;
 import ghidra.program.model.address.AddressSet;
+import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.address.GenericAddressSpace;
 import ghidra.program.model.data.DataType;
@@ -28,9 +35,13 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.pcode.HighFunction;
+import ghidra.program.model.pcode.PcodeBlockBasic;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.SequenceNumber;
 import ghidra.program.model.pcode.Varnode;
+import ghidra.program.model.symbol.SourceType;
+import ghidra.util.task.TaskMonitor;
 
 public class GraphFactory {
     static int nDefaultArgs = 4;
@@ -48,11 +59,14 @@ public class GraphFactory {
     Varnode[] possibleReturnVarnodes;
     Varnode[] possibleCallArgVarnodes;
 
-    /// When inserting RETURN op (e.g. handling tail call), use this as the return address. 
+    /// When inserting RETURN op (e.g. handling tail call), use this as the return
+    /// address.
     Varnode defaultReturnAddress;
     // Varnode defaultMemoryVarnode;
 
     Varnode stackPointer;
+
+    DecompInterface decompInterface = null;
 
     public GraphFactory(Program program) {
         this.program = program;
@@ -64,9 +78,10 @@ public class GraphFactory {
         stackPointer = new Varnode(spReg.getAddress(), spReg.getNumBytes());
         stackBaseSpace = program.getCompilerSpec().getStackBaseSpace();
         // memorySpace = program.getAddressFactory().getDefaultAddressSpace();
-        // defaultMemoryVarnode = new Varnode(storeSpace.getAddress(memorySpace.getSpaceID()), 1);
+        // defaultMemoryVarnode = new
+        // Varnode(storeSpace.getAddress(memorySpace.getSpaceID()), 1);
 
-        /// Determine default varnodes where call args are placed. 
+        /// Determine default varnodes where call args are placed.
         List<Varnode> possibleCallArgList = new ArrayList<>();
         for (var storage : defaultCC.getPotentialInputRegisterStorage(program))
             for (Varnode varnode : storage.getVarnodes())
@@ -78,23 +93,24 @@ public class GraphFactory {
             possibleCallArgList.add(new Varnode(stkAddrSpace.getAddress(stackOffset), pointerSize));
         possibleCallArgVarnodes = possibleCallArgList.toArray(new Varnode[0]);
 
-        /// Need customized ghidra build to provide `getPotentialOutputRegisterStorage` api. 
+        /// Need customized ghidra build to provide `getPotentialOutputRegisterStorage`
+        /// api.
         List<Varnode> possibleReturnValueList = new ArrayList<>();
         for (var storage : defaultCC.getPotentialOutputRegisterStorage(program))
             for (Varnode varnode : storage.getVarnodes())
                 possibleReturnValueList.add(varnode);
         possibleReturnVarnodes = possibleReturnValueList.toArray(new Varnode[0]);
         if (possibleReturnVarnodes.length == 0) {
-            /// Determine default varnodes where return values are placed. 
+            /// Determine default varnodes where return values are placed.
             DataTypeManager dtmanager = program.getDataTypeManager();
             DataType undefinedPtr = dtmanager.getPointer(dtmanager.getDataType(0));
             possibleReturnVarnodes = defaultCC.getReturnLocation(undefinedPtr, program).getVarnodes();
         }
 
-        /// Determine default varnodes where return address is placed. 
+        /// Determine default varnodes where return address is placed.
         Varnode[] returnAddresses = defaultCC.getReturnAddress();
         if (returnAddresses.length >= 1) {
-            assert returnAddresses.length == 1; // Assert for debug. 
+            assert returnAddresses.length == 1; // Assert for debug.
             defaultReturnAddress = returnAddresses[0];
         } else {
             String languageId = program.getLanguageID().getIdAsString();
@@ -141,7 +157,7 @@ public class GraphFactory {
         return res;
     }
 
-    /// Store is the output of STORE op, representing a memory snapshot. 
+    /// Store is the output of STORE op, representing a memory snapshot.
     public Varnode newStore(int spaceId) {
         Address addr = storeSpace.getAddress(spaceId);
         return new Varnode(addr, 0);
@@ -174,6 +190,44 @@ public class GraphFactory {
 
     public CFGFunction constructCfgProgramFromCFGSummaryV1(JSONObject cfgInfo) {
         AddressFactory addressFactory = program.getAddressFactory();
+        Address startEa = addressFactory.getAddress(cfgInfo.getString("start_ea"));
+        Address endEa = addressFactory.getAddress(cfgInfo.getString("end_ea"));
+        Address maxEa = endEa.subtract(1);
+        AddressSet body = addressFactory.getAddressSet(startEa, maxEa);
+        if (decompInterface == null)
+            decompInterface = setUpDecompiler();
+        HighFunction hfunc = checkedGetHFuncContaining(body, decompInterface);
+        if (hfunc == null) {
+            return null;
+        }
+        HashMap<SequenceNumber, CFGBlock> blockMap = new HashMap<>();
+        Function function = hfunc.getFunction();
+        CFGFunctionBuilder builder = new CFGFunctionBuilder(startEa, function);
+        ArrayList<PcodeBlockBasic> pCodeBBs = hfunc.getBasicBlocks();
+        for (var bb : pCodeBBs) {
+            SequenceNumber start = CFGBlock.getPcodeBlockStart(bb);
+            CFGBlock cfgBlock = new CFGBlock(start, 10);
+            builder.append(cfgBlock);
+            blockMap.put(start, cfgBlock);
+            var pcodeIter = bb.getIterator();
+            while (pcodeIter.hasNext()) 
+                adaptOp(pcodeIter.next(), cfgBlock, function);
+        }
+        for (var bb : pCodeBBs) {
+            SequenceNumber start = CFGBlock.getPcodeBlockStart(bb);
+            CFGBlock frbl = blockMap.get(start);
+            frbl.initFlowFromPcodeBlock(blockMap, bb);
+        }
+        // builder.fixFlow();
+        builder.fixMultipleHeads();
+        builder.fixNoReturn();
+        builder.resolveTailBranches(this);
+        return builder.finalizeFuncion(false);
+    }
+
+    /// Does not handle indirected branch. 
+    public CFGFunction constructCfgProgramFromCFGSummaryV1_fallback(JSONObject cfgInfo) {
+        AddressFactory addressFactory = program.getAddressFactory();
         Address fva = addressFactory.getAddress(cfgInfo.getString("start_ea"));
         Address endva = addressFactory.getAddress(cfgInfo.getString("end_ea"));
         Address maxva = endva.subtract(1);
@@ -196,14 +250,14 @@ public class GraphFactory {
         while (inst != null && body.contains(instAddr)) {
             /// inst.getPcode() will not only get the corresponding pcode ops of this instruction 
             ///     but also merge the pcodes of instuctions resided in its delay slots. 
-            /// Example: 00402e94 - bne xxx; 00402e98 - sb xxx. 
+            /// Example: 00402e94 - bne xxx; 00402e98 - sb xxx.
             /// inst = `bne xxx`; inst.getPcode() will return the pcodes corresponding to `sb xxx; bne xxx;`. 
-            /// And inst.getFallThrough() will return 00402e9C. 
+            /// And inst.getFallThrough() will return 00402e9C.
             PcodeOp[] oplist = inst.getPcode();
             for (PcodeOp op : oplist) {
                 adaptOp(op, cfgBlock, function);
             }
-            if (oplist.length == 0) { // Placeholder to fill gaps. Gaps inside a block may confuse further analysis. 
+            if (oplist.length == 0) { // Placeholder to fill gaps. Gaps inside a block may confuse further analysis.
                 adaptOp(newNop(instAddr), cfgBlock, function);
             }
             inst = program.getListing().getInstructionAfter(instAddr);
@@ -213,7 +267,7 @@ public class GraphFactory {
 
         builder.fixFlow();
         builder.resolveTailBranches(this);
-        return builder.finalizeFuncion();
+        return builder.finalizeFuncion(true);
     }
 
     public CFGFunction constructCfgProgramFromCFGSummaryV2(JSONObject cfgInfo) {
@@ -224,7 +278,7 @@ public class GraphFactory {
 
         Function function = getFunctionAt(fva);
 
-        // Step 1: Disasm and build BBs. 
+        // Step 1: Disasm and build BBs.
         HashMap<Long, CFGBlock> blockMap = new HashMap<>();
         CFGFunctionBuilder builder = new CFGFunctionBuilder(fva, function);
         for (Object nodeInfoObj : nodes) {
@@ -236,7 +290,7 @@ public class GraphFactory {
             blockMap.put(nodeStartEa.getOffset(), cfgBlock);
             if (nodeSize == 0)
                 continue;
-            /// Disasm and insert pcodes. 
+            /// Disasm and insert pcodes.
             Address nodeMaxEa = nodeStartEa.add(nodeSize - 1);
             AddressSet body = addressFactory.getAddressSet(nodeStartEa, nodeMaxEa);
             AnalysisHelper.disasmBody(program, body, false);
@@ -250,22 +304,22 @@ public class GraphFactory {
             while (inst != null && body.contains(instAddr)) {
                 /// inst.getPcode() will not only get the corresponding pcode ops of this instruction 
                 ///     but also merge the pcodes of instuctions resided in its delay slots. 
-                /// Example: 00402e94 - bne xxx; 00402e98 - sb xxx. 
+                /// Example: 00402e94 - bne xxx; 00402e98 - sb xxx.
                 /// inst = `bne xxx`; inst.getPcode() will return the pcodes corresponding to `sb xxx; bne xxx;`. 
-                /// And inst.getFallThrough() will return 00402e9C. 
+                /// And inst.getFallThrough() will return 00402e9C.
                 PcodeOp[] oplist = inst.getPcode();
                 for (PcodeOp op : oplist) {
                     adaptOp(op, cfgBlock, function);
                 }
-                if (oplist.length == 0) { // Placeholder to fill gaps. Gaps inside a block may confuse further analysis. 
+                if (oplist.length == 0) { // Placeholder to fill gaps. Gaps inside a block may confuse further analysis.
                     adaptOp(newNop(instAddr), cfgBlock, function);
                 }
                 instAddr = inst.getFallThrough();
                 inst = instAddr != null ? program.getListing().getInstructionAt(instAddr) : null;
             }
         }
-        // Step 2: Process edges. 
-        // TODO Ensure edge orders satisfy the branch semantics? 
+        // Step 2: Process edges.
+        // TODO Ensure edge orders satisfy the branch semantics?
         for (Object edgeInfoObj : edges) {
             JSONArray edgeInfo = (JSONArray) edgeInfoObj;
             long from = edgeInfo.getLong(0), to = edgeInfo.getLong(1);
@@ -274,7 +328,7 @@ public class GraphFactory {
         }
         builder.fixFlow();
         builder.resolveTailBranches(this);
-        return builder.finalizeFuncion();
+        return builder.finalizeFuncion(true);
     }
 
     public SoNGraph constructSeaOfNodes(CFGFunction cfgFunction) {
@@ -290,7 +344,7 @@ public class GraphFactory {
         JSONObject nodesVerb = new JSONObject();
         Stack<T> worklist = new Stack<>();
         Set<T> nodeSet = new HashSet<>();
-        String featKey = (verb_level == 0)? "node_mnems" : "node_asms";
+        String featKey = (verb_level == 0) ? "node_mnems" : "node_asms";
         worklist.push(graph.root());
         while (!worklist.isEmpty()) {
             T node = worklist.pop();
@@ -342,7 +396,7 @@ public class GraphFactory {
         return outParam.getVariableStorage().getVarnodes();
     }
 
-    /// TODO Maybe allow varnodes that have intersection. 
+    /// TODO Maybe allow varnodes that have intersection.
     Varnode newProjsToDisjointVarnodes(Varnode[] outnodes, SequenceNumber seqnum, CFGBlock bl) {
         if (outnodes.length == 0)
             return null;
@@ -366,7 +420,7 @@ public class GraphFactory {
         return retVarnode;
     }
 
-    /// Data uses of stack / memory storage should be loadded first. 
+    /// Data uses of stack / memory storage should be loadded first.
     Varnode adaptVarnode(Varnode varnode, SequenceNumber seqnum, CFGBlock bl) {
         Address addr = varnode.getAddress();
         if (addr.isMemoryAddress()) {
@@ -395,7 +449,7 @@ public class GraphFactory {
     void adaptCall(PcodeOp callOp, CFGBlock bl) {
         SequenceNumber seqnum = callOp.getSeqnum();
         int opc = callOp.getOpcode();
-        /// Identify call args first by decompiled parameters. 
+        /// Identify call args first by decompiled parameters.
         boolean succ = false;
         List<Varnode> args = new ArrayList<>(4);
         Varnode[] outNodes = null;
@@ -416,7 +470,7 @@ public class GraphFactory {
                 outNodes = callee.getReturn().getVariableStorage().getVarnodes();
         }
         if (!succ) {
-            /// Identify call args then by the default calling convension. 
+            /// Identify call args then by the default calling convension.
             for (var varnode : getPossibleCallArgVarnodes()) {
                 args.add(adaptVarnode(varnode, seqnum, bl));
             }
@@ -441,27 +495,27 @@ public class GraphFactory {
             op.setInput(adaptVarnode(defaultReturnAddress, seqnum, bl), 0);
         Varnode[] outNodes;
         if (function != null && function.getReturn() != null) {
-            /// Get possible return nodes by decompiled parameters. 
+            /// Get possible return nodes by decompiled parameters.
             outNodes = function.getReturn().getVariableStorage().getVarnodes();
         } else {
-            /// Get possible return nodes by the calling convension. 
+            /// Get possible return nodes by the calling convension.
             outNodes = getPossibleReturnVarnodes();
         }
         for (int i = outNodes.length - 1; i >= 0; i--) {
             op.setInput(adaptVarnode(outNodes[i], seqnum, bl), i + 1);
         }
         if (outNodes.length == 0) {
-            /// Void return. 
+            /// Void return.
             op.setInput(newConstant(0), 1);
         }
         bl.append(op);
     }
 
     void adaptOp(PcodeOp op, CFGBlock bl, Function function) {
-        /// new PcodeOp-s can be added here, but its seqnum should be set to null. 
+        /// new PcodeOp-s can be added here, but its seqnum should be set to null.
         int opc = op.getOpcode();
         if (opc == PcodeOp.STORE || opc == PcodeOp.LOAD) {
-            /// Replace the address space of the space ID constants 
+            /// Replace the address space of the space ID constants
             Varnode space = op.getInput(0);
             Varnode store = newStore((int) space.getOffset());
             op.setInput(store, 0);
@@ -475,6 +529,77 @@ public class GraphFactory {
         } else {
             bl.append(op);
         }
+    }
+
+    private DecompInterface setUpDecompiler() {
+        DecompInterface decompInterface = new DecompInterface();
+
+        DecompileOptions options;
+        options = new DecompileOptions();
+
+        long suggestedMaxInsts = options.getMaxInstructions(); // 100000
+        options.setMaxInstructions(Integer.MAX_VALUE);
+        ColoredPrint.info("Changing max_instructions from 0x%x to 0x%x. ", suggestedMaxInsts, Integer.MAX_VALUE);
+
+        decompInterface.setOptions(options);
+
+        decompInterface.toggleCCode(false);
+        decompInterface.toggleSyntaxTree(true);
+        decompInterface.setSimplificationStyle("normalize");
+        if (!decompInterface.openProgram(program)) {
+            System.out.printf("Decompiler error: %s\n", decompInterface.getLastMessage());
+        }
+        return decompInterface;
+    }
+
+    private HighFunction checkedGetHFuncContaining(AddressSetView body, DecompInterface decompInterface) {
+        Address startEa = body.getMinAddress();
+        Address endEa = body.getMaxAddress();
+        Function func = program.getFunctionManager().getFunctionAt(startEa);
+
+        /// Check failed (1): Try disasmbling and re-create the function.
+        if (func == null || !body.subtract(func.getBody()).isEmpty()) {
+            /// Create function if not valid.
+            int txId = program.startTransaction("CreateFunction");
+            AddressSetView toBeDecompiled = body;
+            while (true) {
+                DisassembleCommand cmd = new DisassembleCommand(toBeDecompiled, toBeDecompiled,
+                        false);
+                cmd.applyTo(program, TaskMonitor.DUMMY);
+                AddressSetView decompiled = cmd.getDisassembledAddressSet();
+                toBeDecompiled = toBeDecompiled.subtract(decompiled);
+                if (toBeDecompiled.isEmpty() || decompiled.isEmpty())
+                    break;
+            }
+            CreateFunctionCmd fcmd = new CreateFunctionCmd(null, startEa, body, SourceType.DEFAULT, false, true);
+            fcmd.applyTo(program, TaskMonitor.DUMMY);
+            func = program.getListing().getFunctionAt(startEa);
+            program.endTransaction(txId, true);
+
+            if (func == null) {
+                ColoredPrint.error(
+                        "Create function failed (start: %x, end: %x) ",
+                        startEa.getOffset(), endEa.getOffset());
+                return null;
+            }
+        }
+
+        /// Decompile first, decompling may fix some previous wrong analysis.
+        /// decompInterface.getOptions().getDefaultTimeout() == 30
+        // Linearly with the number of instructions
+        int decompilingTimeSecs = Integer.max((int) body.getNumAddresses() / 100, 30);
+        DecompileResults dresult = decompInterface
+                .decompileFunction(func, decompilingTimeSecs, TaskMonitor.DUMMY);
+        HighFunction hfunc = dresult.getHighFunction();
+
+        if (hfunc == null) {
+            ColoredPrint.error(
+                    "Decompile function failed! Function (start: %x, end: %x, body: %s)",
+                    startEa.getOffset(), endEa.getOffset(), func.getBody());
+            ColoredPrint.error(dresult.getErrorMessage());
+            return null;
+        }
+        return hfunc;
     }
 
 }

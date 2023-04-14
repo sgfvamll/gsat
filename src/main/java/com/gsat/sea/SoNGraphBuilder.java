@@ -18,10 +18,13 @@ public class SoNGraphBuilder {
     SoNNode end = SoNNode.newEnd();
     List<SoNNode> regions;
     List<SemiDefState> phiDefs;
+    Map<PcodeOp, SoNNode> phiMap;
 
     GraphFactory graphFactory;
     CFGFunction cfgFunction;
     List<CFGBlock> nodes;
+
+    boolean useRawPcode;
 
     /// 0x4f,0x5f,0x6f are a invaild spaceId-s, so will not conflict with normal address spaces. 
     static Varnode memoryNode = new Varnode(GraphFactory.getStoreSpace().getAddress(0x51), 1);
@@ -111,8 +114,8 @@ public class SoNGraphBuilder {
                 return null;
             }
             boolean noDefOverlapped = true;
-            /// Find all defs that are overlaped with this required use. 
-            /// Subpiece those defs and finally piece the use. 
+            /// Find all defs that are overlaped with this required use.
+            /// Subpiece those defs and finally piece the use.
             boolean isIntersecting = sEntry != null && requiredRange.intersect(sEntry.getKey()) != null;
             AddressInterval iterStart = isIntersecting ? sEntry.getKey() : requiredRange;
             List<Pair<AddressInterval, SoNNode>> newDefs = new ArrayList<>();
@@ -172,7 +175,7 @@ public class SoNGraphBuilder {
             return put(AddressInterval.fromVarnode(varnode), node);
         }
 
-        /// Return the old value associated with the key. 
+        /// Return the old value associated with the key.
         public SoNNode put(AddressInterval requiredRange, SoNNode node) {
             var sEntry = state.floorEntry(requiredRange);
             if (sEntry != null && sEntry.getKey().equals(requiredRange)) {
@@ -206,11 +209,11 @@ public class SoNGraphBuilder {
             for (AddressInterval interval : tobeRemoved) {
                 remove(interval);
             }
-            /// Insert back remaining defs (not covered part of the removed defs). 
+            /// Insert back remaining defs (not covered part of the removed defs).
             for (var pair : newView) {
                 putOnNewKey(pair.first, pair.second);
             }
-            /// Finally, insert the new def. 
+            /// Finally, insert the new def.
             putOnNewKey(requiredRange, node);
             return null;
         }
@@ -218,7 +221,7 @@ public class SoNGraphBuilder {
         public void removeOverlappedWith(AddressInterval interval) {
             var sEntry = state.floorEntry(interval);
             if (sEntry != null && sEntry.getKey().equals(interval)) {
-                /// The key is exactly contained. 
+                /// The key is exactly contained.
                 state.remove(interval);
                 return;
             }
@@ -354,6 +357,7 @@ public class SoNGraphBuilder {
         this.nodes = cfgFunction.getBlocks();
         this.cfgFunction = cfgFunction;
         this.graphFactory = graphFactory;
+        this.useRawPcode = cfgFunction.useRawPcode();
     }
 
     public SoNGraph build() {
@@ -364,8 +368,14 @@ public class SoNGraphBuilder {
         List<List<Integer>> childrenListInDT = df.getChildrenListInDT();
         // Step 2. Construct regions and insert PHI nodes 
         buildRegions();
-        insertPhiNodes(domfrontsets);
-        // Step 3. Construct Sea of Nodes. 
+        if (useRawPcode)
+            insertPhiNodes(domfrontsets, false);
+        else {
+            preparePhi();
+            insertPhiNodes(domfrontsets, true);
+        }
+
+        // Step 3. Construct Sea of Nodes.
         //      traversal in the order of dominator relations. 
         return build(childrenListInDT);
     }
@@ -385,23 +395,25 @@ public class SoNGraphBuilder {
         regions.get(0).addControlUse(start);
     }
 
-    private void insertPhiNodes(List<Set<Integer>> domfrontsets) {
+    private void insertPhiNodes(List<Set<Integer>> domfrontsets, boolean effectOnly) {
         /// Get all defsites, i.e. each varnode is defined on which basic blocks
         /// It's important to perserve order (make sure Varnode(A, size=s1) is before Varnode(A, size=s2) where s1 < s2)
         TreeMap<Varnode, Set<Integer>> defsites = new TreeMap<>(new AddressInterval.VarnodeComparator());
         for (CFGBlock n : cfgFunction.getBlocks()) {
             for (PcodeOp op : n.getPcodeOps()) {
+                if (SoNOp.defineOtherEffect(op.getOpcode())) /// effect def
+                    defsites.computeIfAbsent(effectNode, k -> new HashSet<>()).add(n.id());
+                if (SoNOp.defineMemoryEffect(op.getOpcode()))
+                    defsites.computeIfAbsent(memoryNode, k -> new HashSet<>()).add(n.id());
+                if (effectOnly)
+                    continue;
                 Varnode out = op.getOutput();
                 if (out == null)
                     continue; /// no data out
                 defsites.computeIfAbsent(out, k -> new HashSet<>()).add(n.id());
-                // if (SoNOp.defineOtherEffect(op.getOpcode())) /// effect def 
-                //     defsites.computeIfAbsent(effectNode, k -> new HashSet<>()).add(n.id());
-                if (SoNOp.defineMemoryEffect(op.getOpcode()))
-                    defsites.computeIfAbsent(memoryNode, k -> new HashSet<>()).add(n.id());
             }
         }
-        /// Inserting phi nodes 
+        /// Inserting phi nodes
         for (var ndefs : defsites.entrySet()) {
             AddressInterval interval = AddressInterval.fromVarnode(ndefs.getKey());
             Deque<Integer> worklist = new ArrayDeque<>(ndefs.getValue());
@@ -423,19 +435,32 @@ public class SoNGraphBuilder {
         }
     }
 
+    private void preparePhi() {
+        phiMap = new HashMap<>();
+        for (CFGBlock n : cfgFunction.getBlocks()) {
+            int blId = n.id();
+            for (PcodeOp op : n.getPcodeOps()) {
+                if (op.getOpcode() != PcodeOp.MULTIEQUAL)
+                    break;
+                SoNNode phi = SoNNode.newPhi(regions.get(blId), op.getNumInputs(), 0);
+                phiMap.put(op, phi);
+            }
+        }
+    }
+
     private SoNGraph build(List<List<Integer>> bfsOrderTree) {
         worklist.push(nodes.get(0));
         while (!worklist.isEmpty()) {
             CFGBlock bl = worklist.peek();
             if (!processed.contains(bl)) {
-                processed.add(bl); // Mark as processed. 
+                processed.add(bl); // Mark as processed.
                 buildOneBlock(bl);
                 state.commit();
                 for (var childId : bfsOrderTree.get(bl.id())) {
                     worklist.push(nodes.get(childId));
                 }
             } else {
-                /// backtrack 
+                /// backtrack
                 state.revert();
                 worklist.pop();
             }
@@ -459,19 +484,24 @@ public class SoNGraphBuilder {
                 state.put(out, state.peekOrNew(input));
                 continue;
             }
-            /// Assert that branches/return must be the last op. 
+            if (opc == PcodeOp.MULTIEQUAL) {
+                Varnode out = op.getOutput();
+                state.put(out, phiMap.get(op));
+                continue;
+            }
+            /// Assert that branches/return must be the last op.
             assert opIdx == numOps || !SoNOp.endsBlock(opc);
             /// Link data uses from opcode inputs
-            SoNNode soNNode = SoNOp.endsBlock(opc) ? blRegion : SoNNode.newBaseSoNNodeFromOp(op);
+            SoNNode soNNode = SoNOp.endsBlock(opc) ? blRegion : SoNNode.newSoNNodeFromOp(op);
             for (int i = dataUseStart; i < op.getNumInputs(); i++) {
                 Varnode input = op.getInput(i);
                 soNNode.setUse(i - dataUseStart, state.peekOrNew(input));
             }
             /// Link effect edges 
-            // if (SoNOp.useOtherEffect(opc))
-            //     soNNode.addOtherEffectUse(state.peekOrNew(effectNode));
-            // if (SoNOp.defineOtherEffect(opc))
-            //     state.put(effectNode, soNNode);
+            if (SoNOp.useOtherEffect(opc))
+                soNNode.addOtherEffectUse(state.peekOrNew(effectNode));
+            if (SoNOp.defineOtherEffect(opc))
+                state.put(effectNode, soNNode);
             if (SoNOp.useMemoryEffect(opc))
                 soNNode.addMemoryEffectUse(state.peekOrNew(memoryNode));
             if (SoNOp.defineMemoryEffect(opc))
@@ -492,15 +522,23 @@ public class SoNGraphBuilder {
             assert blRegion.getUses().size() > 1;
             end.addControlUse(blRegion); // Link RETURN-s to END
         }
+        /// TODO Project control output
         /// Process region control inputs
         for (CFGBlock pred : bl.getPredecessors()) {
             blRegion.addControlUse(regions.get(pred.id()));
         }
         /// Link succ's phi nodes
         for (CFGBlock succ : bl.getSuccessors()) {
-            int j = SoNOp.dataUseStart(PcodeOp.MULTIEQUAL) + succ.getPredIdx(bl);
+            int inOrder = succ.getPredIdx(bl);
+            int j = SoNOp.dataUseStart(PcodeOp.MULTIEQUAL) + inOrder;
             for (var entry : phiDefs.get(succ.id()).entrySet()) {
                 entry.getValue().setUse(j, state.peekOrNew(entry.getKey()));
+            }
+            for (PcodeOp op : succ.getPcodeOps()) {
+                if (op.getOpcode() != PcodeOp.MULTIEQUAL || inOrder >= op.getNumInputs())
+                    break;
+                Varnode in = op.getInput(inOrder);
+                phiMap.get(op).setUse(j, state.peekOrNew(in));
             }
         }
     }

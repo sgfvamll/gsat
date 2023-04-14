@@ -1,5 +1,7 @@
 package com.gsat.tools;
 
+import java.util.ArrayList;
+
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Option;
 import org.json.*;
@@ -79,7 +81,7 @@ public class PCodeExtractorV2 extends BaseTool {
         String orgImageBaseStr = props.getString(ElfLoader.ELF_ORIGINAL_IMAGE_BASE_PROPERTY, "0x0");
         long orgImageBase = Long.decode(orgImageBaseStr);
         return program.getImageBase().getOffset() - orgImageBase;
-    } 
+    }
 
     private void dumpOneFunc(JSONObject oneCfgJson) {
         GraphFactory graphFactory = new GraphFactory(program);
@@ -120,7 +122,7 @@ public class PCodeExtractorV2 extends BaseTool {
             for (var oneCfgInfo : cfgInfos) {
                 JSONObject oneCfgJson = (JSONObject) oneCfgInfo;
                 String startEa = (String) oneCfgJson.get("start_ea");
-                if (!debugged_func.equals(startEa)) 
+                if (!debugged_func.equals(startEa))
                     continue;
                 dumpOneFunc(oneCfgJson);
                 break;
@@ -128,13 +130,17 @@ public class PCodeExtractorV2 extends BaseTool {
             return true;
         }
 
-        long startTime=System.currentTimeMillis();
+        long startTime = System.currentTimeMillis();
+        ArrayList<String> errorFuncs = new ArrayList<>();
         GraphFactory graphFactory = new GraphFactory(program);
         JSONObject binOut = new JSONObject();
         for (var oneCfgInfo : cfgInfos) {
             graphFactory.clearState();
             JSONObject oneCfgJson = (JSONObject) oneCfgInfo;
             CFGFunction cfgFunction = graphFactory.constructCfgProgramFromCFGSummary(oneCfgJson);
+            if (cfgFunction == null) {
+                errorFuncs.add(oneCfgJson.getString("start_ea"));
+            }
             JSONObject dumppedGraph = null;
             switch (outputFormat) {
                 case "ACFG":
@@ -147,9 +153,12 @@ public class PCodeExtractorV2 extends BaseTool {
             }
             binOut.putOpt((String) oneCfgJson.get("start_ea"), dumppedGraph);
         }
-        long endTime=System.currentTimeMillis();
+        long endTime = System.currentTimeMillis();
         ColoredPrint.info(
-            String.format("Time for extraction: %.2f secs. ", (endTime-startTime)/1000.0) );
+                String.format("Time for extraction: %.2f secs. ", (endTime - startTime) / 1000.0));
+        if (errorFuncs.size() != 0)
+            ColoredPrint.warning(
+                    String.format("Error count: %d. Error funcs: %s", errorFuncs.size(), errorFuncs.toString()));
 
         JSONObject binOutWrap = new JSONObject();
         binOutWrap.put(idb_path, binOut);
