@@ -66,7 +66,8 @@ public class GraphFactory {
 
     Varnode stackPointer;
 
-    DecompInterface decompInterface = null;
+    DecompInterface decompInterface1 = null;
+    DecompInterface decompInterface2 = null;
 
     public GraphFactory(Program program) {
         this.program = program;
@@ -194,11 +195,18 @@ public class GraphFactory {
         Address endEa = addressFactory.getAddress(cfgInfo.getString("end_ea"));
         Address maxEa = endEa.subtract(1);
         AddressSet body = addressFactory.getAddressSet(startEa, maxEa);
-        if (decompInterface == null)
-            decompInterface = setUpDecompiler();
-        HighFunction hfunc = checkedGetHFuncContaining(body, decompInterface);
+        if (decompInterface1 == null) {
+            decompInterface1 = setUpDecompiler("normalize");
+            decompInterface2 = setUpDecompiler("firstpass");
+        }
+        HighFunction hfunc = checkedGetHFuncContaining(body, decompInterface1);
         if (hfunc == null) {
-            return null;
+            // Give another try with different settings. 
+            // Pcode generated using 'firstpass' style still has MULTIEQUAL. 
+            // That is, not in raw pcode form. 
+            hfunc = checkedGetHFuncContaining(body, decompInterface2);
+            if (hfunc == null)
+                return null;
         }
         HashMap<SequenceNumber, CFGBlock> blockMap = new HashMap<>();
         Function function = hfunc.getFunction();
@@ -531,7 +539,7 @@ public class GraphFactory {
         }
     }
 
-    private DecompInterface setUpDecompiler() {
+    private DecompInterface setUpDecompiler(String simplificationStyle) {
         DecompInterface decompInterface = new DecompInterface();
 
         DecompileOptions options;
@@ -545,7 +553,7 @@ public class GraphFactory {
 
         decompInterface.toggleCCode(false);
         decompInterface.toggleSyntaxTree(true);
-        decompInterface.setSimplificationStyle("normalize");
+        decompInterface.setSimplificationStyle(simplificationStyle);
         if (!decompInterface.openProgram(program)) {
             System.out.printf("Decompiler error: %s\n", decompInterface.getLastMessage());
         }

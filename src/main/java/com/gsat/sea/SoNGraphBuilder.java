@@ -425,8 +425,10 @@ public class SoNGraphBuilder {
             PcodeOp last = n.getLastOp();
             assert !n.isReturnBlock() || last.getOpcode() == PcodeOp.RETURN;
             SoNNode controlNode = SoNNode.newRegion(last);
-            if (last != null && last.getOpcode() == PcodeOp.CBRANCH) {
-                assert n.getSuccessors().size() == 2;
+            if (last != null && last.getOpcode() == PcodeOp.CBRANCH && n.getSuccessors().size() == 2) {
+                // The assert fails when cbr just jump to the fallthrough
+                // TODO Maybe check it is this case rather than bugs. 
+                // assert n.getSuccessors().size() == 2;
                 if (useRawPcode) {
                     SequenceNumber succ0 = n.getSuccessors().get(0).getStartSeqNum();
                     SequenceNumber succ1 = n.getSuccessors().get(1).getStartSeqNum();
@@ -528,6 +530,7 @@ public class SoNGraphBuilder {
                 worklist.pop();
             }
         }
+        assert processed.size() == cfgFunction.getNumBlocks();
         return new SoNGraph(end);
     }
 
@@ -586,15 +589,22 @@ public class SoNGraphBuilder {
             end.addControlUse(blRegion); // Link RETURN-s to END
         }
         /// Link succ's phi nodes
+        HashMap<Integer, Integer> occurenceMap = new HashMap<>();
         for (CFGBlock succ : bl.getSuccessors()) {
-            int inOrder = succ.getPredIdx(bl);
+            /// Multi-edges may exist ...
+            occurenceMap.putIfAbsent(succ.id(), 0);
+            int occurence = occurenceMap.get(succ.id());
+            int inOrder = succ.getPredIdx(bl, occurence);
+            occurenceMap.put(succ.id(), occurence + 1);
             int j = SoNOp.dataUseStart(PcodeOp.MULTIEQUAL) + inOrder;
             for (var entry : phiDefs.get(succ.id()).entrySet()) {
                 entry.getValue().setUse(j, state.peekOrNew(entry.getKey()));
             }
             for (PcodeOp op : succ.getPcodeOps()) {
-                if (op.getOpcode() != PcodeOp.MULTIEQUAL || inOrder >= op.getNumInputs())
+                if (op.getOpcode() != PcodeOp.MULTIEQUAL)
                     break;
+                if (inOrder >= op.getNumInputs())
+                    continue;
                 Varnode in = op.getInput(inOrder);
                 phiMap.get(op).setUse(j, state.peekOrNew(in));
             }

@@ -205,8 +205,15 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         return cfgOuts;
     }
 
-    public int getPredIdx(CFGBlock pred) {
-        return cfgIns.indexOf(pred);
+    public int getPredIdx(CFGBlock pred, int occurrence) {
+        int n = 0;
+        for (int i = 0; i < cfgIns.size(); i++) 
+            if (pred.equals(cfgIns.get(i))) {
+                if (n == occurrence) 
+                    return i;
+                n += 1;
+            }
+        return -1;
     }
 
     public int getSuccIdx(CFGBlock succ) {

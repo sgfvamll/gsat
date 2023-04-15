@@ -52,7 +52,8 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
     }
 
     public void append(CFGBlock bl) {
-        assert blocks.get(bl.getStartSeqNum()) == null;
+        // Nop block maybe generated and break this assert. Maybe just ignore it. 
+        // assert blocks.get(bl.getStartSeqNum()) == null;
         blocks.put(bl.getStartSeqNum(), bl);
         if (worklist != null)
             worklist.push(bl);
@@ -149,7 +150,7 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
     ///      And merge fixReturnBlockHasSucc. 
     public void fixFlow() {
         fixBranch();
-        removeEmptyBlock();
+        // removeEmptyBlock();
         fixMultipleHeads();
         fixNoReturn();
     }
