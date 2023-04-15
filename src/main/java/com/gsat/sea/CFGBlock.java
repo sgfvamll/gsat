@@ -209,6 +209,10 @@ public class CFGBlock implements DAGNode<CFGBlock> {
         return cfgIns.indexOf(pred);
     }
 
+    public int getSuccIdx(CFGBlock succ) {
+        return cfgOuts.indexOf(succ);
+    }
+
     public boolean isReturnBlock() {
         return cfgOuts.size() == 0;
     }

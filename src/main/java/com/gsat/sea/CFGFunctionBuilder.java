@@ -41,11 +41,11 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
     public CFGBlock root() {
         if (root != null)
             return root;
-        for (var bl: blocks.values()) {
+        for (var bl : blocks.values()) {
             if (bl.getAddress().equals(fva))
                 return bl;
         }
-        for (var bl: blocks.values())
+        for (var bl : blocks.values())
             if (bl.getAddress().compareTo(fva) >= 0)
                 return bl;
         return null;
@@ -318,6 +318,7 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
             assert splitIdx > 0;
             targetBl = splitted.splitAt(splitIdx);
             append(targetBl);
+            linkBranchTarget(splitted, targetBl);
             if (splitted == cur) // Ref equal
                 cur = targetBl; // cur points to the block that branchs
         }
@@ -348,8 +349,8 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
         int opc = lastOp.getOpcode();
         if (opc == PcodeOp.RETURN) {
             bl.clearOutFlow();
-        } else if (opc == PcodeOp.BRANCH) {
-            /// TODO May try fixing other block-end operations 
+        } else if (opc == PcodeOp.CBRANCH && bl.getSuccessors().size() == 1) {
+            linkBranchTarget(bl, null);
         }
     }
 

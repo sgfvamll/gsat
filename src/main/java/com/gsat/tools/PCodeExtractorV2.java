@@ -137,6 +137,10 @@ public class PCodeExtractorV2 extends BaseTool {
         for (var oneCfgInfo : cfgInfos) {
             graphFactory.clearState();
             JSONObject oneCfgJson = (JSONObject) oneCfgInfo;
+            /// For debug. 
+            // if (oneCfgJson.getString("start_ea").equals("0x9781")) {
+            //     ColoredPrint.info("123");
+            // }
             CFGFunction cfgFunction = graphFactory.constructCfgProgramFromCFGSummary(oneCfgJson);
             if (cfgFunction == null) {
                 errorFuncs.add(oneCfgJson.getString("start_ea"));

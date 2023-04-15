@@ -9,6 +9,7 @@ import com.gsat.sea.analysis.Dominators;
 import generic.stl.Pair;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.pcode.PcodeOp;
+import ghidra.program.model.pcode.SequenceNumber;
 import ghidra.program.model.pcode.Varnode;
 
 public class SoNGraphBuilder {
@@ -380,16 +381,78 @@ public class SoNGraphBuilder {
         return build(childrenListInDT);
     }
 
+    // '''
+    // Basically, during the simplification process, the first input of the CBRANCH operation 
+    // does not change - it will always be the original jump target. However, the decompiler 
+    // adds some state to the CBRANCH operation, which can change the meaning of the 
+    // operation (like whether the jump is taken on a true condition or a false condition). 
+    // Also, the branching structure is encoded in the block graph, which explains what you 
+    // saw with the getTrueOut and getFalseOut methods. Keep in mind that simplification can 
+    // make some pretty drastic changes - for example, an entire block could be removed if 
+    // its pcode ops were all simplified away.
+    // '''
+    // https://github.com/NationalSecurityAgency/ghidra/issues/2736
+    // So, ghidra is right.. 
+    private int determineCBRFallThrough(PcodeOp cbr, SequenceNumber succ0, SequenceNumber succ1) {
+        // Ghidra is so buggy. PcodeBlock.getTrueOut returns wrong results. 
+        // So we can only rely on ourselves. 
+        SequenceNumber br = cbr.getSeqnum();
+        Address target = cbr.getInput(0).getAddress();
+        if (target.equals(succ0.getTarget()) ^ target.equals(succ1.getTarget())) {
+            return target.equals(succ1.getTarget()) ? 0 : 1;
+        }
+        if (succ0.getTarget().equals(succ1.getTarget())) {
+            if (succ0.getTime() == succ1.getTime())
+                // Fail to determine fall through. 
+                return -1;
+            return succ0.getTime() < succ1.getTime() ? 0 : 1;
+        }
+        Long s0 = succ0.getTarget().subtract(br.getTarget());
+        Long s1 = succ1.getTarget().subtract(br.getTarget());
+        if (s0 >= 0 && s1 >= 0)
+            return s0 < s1 ? 0 : 1;
+        return s1 < 0 ? 0 : 1;
+    }
+
     private void buildRegions() {
         regions = new ArrayList<>(nodes.size());
         phiDefs = new ArrayList<SemiDefState>(nodes.size());
+        Integer[] fallThroughs = new Integer[nodes.size()];
+        Arrays.fill(fallThroughs, -1);
         for (CFGBlock n : nodes) {
             phiDefs.add(new SemiDefState());
             /// Init Region Nodes. 
             PcodeOp last = n.getLastOp();
             assert !n.isReturnBlock() || last.getOpcode() == PcodeOp.RETURN;
             SoNNode controlNode = SoNNode.newRegion(last);
+            if (last != null && last.getOpcode() == PcodeOp.CBRANCH) {
+                assert n.getSuccessors().size() == 2;
+                if (useRawPcode) {
+                    SequenceNumber succ0 = n.getSuccessors().get(0).getStartSeqNum();
+                    SequenceNumber succ1 = n.getSuccessors().get(1).getStartSeqNum();
+                    fallThroughs[n.id()] = determineCBRFallThrough(last, succ0, succ1);
+                } else {
+                    // PcodeBlock.getFalseOut returns the first out, 
+                    // which means the first out is the fallthrough. 
+                    fallThroughs[n.id()] = 0;
+                }
+            }
             regions.add(controlNode);
+        }
+        /// Process region control inputs
+        for (CFGBlock bl : nodes) {
+            SoNNode blRegion = regions.get(bl.id());
+            for (CFGBlock pred : bl.getPredecessors()) {
+                int prid = pred.id();
+                if (fallThroughs[prid] == -1)
+                    blRegion.addControlUse(regions.get(prid));
+                else {
+                    int projIdx = pred.getSuccIdx(bl) == fallThroughs[prid] ? 0 : 1;
+                    SoNNode prRegion = regions.get(prid);
+                    SoNNode cproj = SoNNode.newControlProject(prRegion, projIdx);
+                    blRegion.addControlUse(cproj);
+                }
+            }
         }
         SoNNode start = SoNNode.newBrRegion(0);
         regions.get(0).addControlUse(start);
@@ -521,11 +584,6 @@ public class SoNGraphBuilder {
             assert blRegion.op() instanceof ReturnRegion;
             assert blRegion.getUses().size() > 1;
             end.addControlUse(blRegion); // Link RETURN-s to END
-        }
-        /// TODO Project control output
-        /// Process region control inputs
-        for (CFGBlock pred : bl.getPredecessors()) {
-            blRegion.addControlUse(regions.get(pred.id()));
         }
         /// Link succ's phi nodes
         for (CFGBlock succ : bl.getSuccessors()) {

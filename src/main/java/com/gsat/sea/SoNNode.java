@@ -231,6 +231,13 @@ public class SoNNode implements DAGNode<SoNNode> {
         return project;
     }
 
+    public static SoNNode newControlProject(SoNNode input, long offset) {
+        SoNNode project = new SoNNode(new Project(0), 0);
+        project.addControlUse(input);
+        project.addControlUse(SoNNode.newConstant(offset, 8));
+        return project;
+    }
+
     public static SoNNode newPiece(int numDataUses) {
         return new SoNNode(PcodeOp.PIECE, numDataUses);
     }
