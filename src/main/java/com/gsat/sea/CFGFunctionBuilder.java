@@ -240,6 +240,8 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
         for (var entry : blocks.entrySet()) {
             List<PcodeOp> oplist = entry.getValue().getPcodeOps();
             int i = oplist.size() - 1;
+            if (i < 0)
+                continue;
             PcodeOp lastNoBranch = oplist.get(i);
             while (i > 0 && SoNOp.endsBlock(lastNoBranch.getOpcode())) {
                 lastNoBranch = oplist.get(--i);
@@ -252,7 +254,7 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
         if (possibleEndBlocks.isEmpty()) {
             for (var entry : blocks.entrySet()) {
                 PcodeOp lastOp = entry.getValue().getLastOp();
-                if (lastOp.getOpcode() == PcodeOp.BRANCHIND) {
+                if (lastOp != null && lastOp.getOpcode() == PcodeOp.BRANCHIND) {
                     possibleEndBlocks.add(entry.getValue());
                 }
             }
@@ -261,7 +263,7 @@ public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
         if (possibleEndBlocks.isEmpty()) {
             for (var entry : blocks.entrySet()) {
                 PcodeOp lastOp = entry.getValue().getLastOp();
-                if (lastOp.getOpcode() == PcodeOp.CBRANCH) {
+                if (lastOp != null && lastOp.getOpcode() == PcodeOp.CBRANCH) {
                     possibleEndBlocks.add(entry.getValue());
                 }
             }
