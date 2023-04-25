@@ -210,10 +210,10 @@ public class SoNNode implements DAGNode<SoNNode> {
     }
 
     public static SoNNode newPhi(SoNNode region, int numUses, int type) {
-        int numDataUses = 1 + (type != 0 ? 0 : numUses);
+        int numDataUses = type != 0 ? 0 : numUses;
         int numEffectUses = type != 0 ? numUses : 0;
         SoNNode phi = new SoNNode(new Phi(), numDataUses);
-        phi.setUse(0, region);
+        phi.addControlUse(region);
         for (int i = 0; i < numEffectUses; i++)
             phi.addUse(type, null);
         return phi;

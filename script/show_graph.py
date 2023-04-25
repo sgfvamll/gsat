@@ -164,6 +164,9 @@ def randAbs(low, high):
     x = random.random() * (high-low) + low
     return x if random.random() < 0.5 else -x
 
+def asm_key():
+    # return 'node_mnems'
+    return 'node_asms'
 
 if __name__ == "__main__":
     graph_fp = sys.argv[1]
@@ -190,7 +193,7 @@ if __name__ == "__main__":
         graph = create_graph(nodes, edges)
         print(fva, graph)
         nodes_verbs = [
-            (int(nid), mnem_data['node_mnems'][0])
+            (int(nid), mnem_data[asm_key()][0])
             for nid, mnem_data in func_data['nodes_verbs'].items()
         ]
         labels = dict([
@@ -218,7 +221,7 @@ if __name__ == "__main__":
         print(edges)
         edge_styles = [EDGE_STYLE_MAP[ty] for u, v, ty in edges]
         plt.plot()
-        nx.draw(graph, pos, labels=labels, node_size=1000,
+        nx.draw_networkx(graph, pos, labels=labels, node_size=1000,
                 edgelist=edges, style=edge_styles,
                 nodelist=nodes, node_color=node_colors)
         plt.show()
