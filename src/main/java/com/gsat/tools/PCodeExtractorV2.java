@@ -9,6 +9,7 @@ import org.json.*;
 import com.gsat.helper.AnalysisHelper;
 import com.gsat.sea.GraphFactory;
 import com.gsat.sea.CFGFunction;
+import com.gsat.sea.DFGFunction;
 import com.gsat.sea.SoNGraph;
 import com.gsat.utils.ColoredPrint;
 import com.gsat.utils.CommonUtils;
@@ -40,7 +41,7 @@ public class PCodeExtractorV2 extends BaseTool {
                 new Option("va", "function_vaddress", true, "The function to be dumpped. "),
                 new Option("c", "cfg_file", true,
                         "Path to a json file that contains all selected functions along with its CFG (i.e. *_cfg_disasm.json). "),
-                new Option("of", "output_format", true, "One of {'ACFG', 'SoN', 'tSoN'}"),
+                new Option("of", "output_format", true, "One of {'ACFG', 'DFG', 'SoN', 'tSoN'}"),
                 new Option("v", "verbose_level", true, "`0` for mnems only and `1` for full. "),
         };
     }
@@ -150,6 +151,10 @@ public class PCodeExtractorV2 extends BaseTool {
             switch (outputFormat) {
                 case "ACFG":
                     dumppedGraph = graphFactory.dumpGraph(cfgFunction, verbose_level);
+                    break;
+                case "DFG":
+                    DFGFunction dfg = graphFactory.constructDFG(cfgFunction);
+                    dumppedGraph = graphFactory.dumpGraph(dfg, verbose_level);
                     break;
                 case "SoN":
                     SoNGraph graph = graphFactory.constructSeaOfNodes(cfgFunction);

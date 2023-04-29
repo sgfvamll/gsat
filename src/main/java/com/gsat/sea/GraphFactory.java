@@ -3,15 +3,19 @@ package com.gsat.sea;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 
-import org.apache.commons.lang3.ObjectUtils.Null;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.gsat.helper.AnalysisHelper;
+import com.gsat.sea.SoNOp.ConstantLong;
+import com.gsat.sea.SoNOp.MemorySpace;
+import com.gsat.sea.SoNOp.Store;
 import com.gsat.sea.analysis.DAGGraph;
 import com.gsat.sea.analysis.DAGNode;
 import com.gsat.utils.ColoredPrint;
@@ -218,7 +222,7 @@ public class GraphFactory {
             builder.append(cfgBlock);
             blockMap.put(start, cfgBlock);
             var pcodeIter = bb.getIterator();
-            while (pcodeIter.hasNext()) 
+            while (pcodeIter.hasNext())
                 adaptOp(pcodeIter.next(), cfgBlock, function);
         }
         for (var bb : pCodeBBs) {
@@ -345,6 +349,95 @@ public class GraphFactory {
         return builder.build();
     }
 
+    private Varnode getDefinedVarnode(SoNNode soNNode) {
+        Varnode definedNode = soNNode.definedNode;
+        if (definedNode != null)
+            return definedNode;
+        int opc = soNNode.opcode();
+        if (opc == -2) {
+            ConstantLong longOp = (ConstantLong) soNNode.op();
+            soNNode.definedNode = new Varnode(
+                constantSpace.getAddress(longOp.constant), longOp.size);
+        } else if (opc == -4) {
+            MemorySpace space = (MemorySpace) soNNode.op();
+            soNNode.definedNode = new Varnode(storeSpace.getAddress(space.id), 0);
+        } else if (opc == -7) {
+            Store store = (Store) soNNode.op(); 
+            Address a = program.getAddressFactory().getStackSpace().getAddress(store.id);
+            soNNode.definedNode = new Varnode(a, store.size);
+        }
+        return soNNode.definedNode;
+    }
+
+    /// TODO Fix definedNode for some cases. 
+    private PcodeOp generatPcodeOpFromSoNNode(SoNNode soNNode) {
+        int opc = soNNode.opcode();
+        if (opc <= 0 || opc >= PcodeOp.PCODE_MAX)
+            return null;
+        List<Varnode> inputs = new ArrayList<>();
+        for (var use : soNNode.getDataUses()) {
+            var out = getDefinedVarnode(use);
+            inputs.add(out);
+        }
+        Varnode definedNode = getDefinedVarnode(soNNode);
+        return new PcodeOp(null, opc, inputs.toArray(new Varnode[0]), definedNode);
+    }
+
+    public DFGFunction constructDFGFromSNG(Address fva, SoNGraph sng) {
+        Stack<SoNNode> worklist = new Stack<>();
+        Map<PcodeOp, DFGNode> nodes = new IdentityHashMap<>();
+        Set<SoNNode> nodeSet = new HashSet<>();
+        worklist.addAll(sng.workroots());
+        nodeSet.addAll(worklist);
+        while (!worklist.isEmpty()) {
+            SoNNode soNNode = worklist.pop();
+            List<PcodeOp> definedOps = soNNode.getDefinedOps();
+            if (definedOps.size() == 0) {
+                var created = generatPcodeOpFromSoNNode(soNNode);
+                if (created != null)
+                    definedOps.add(created);
+            }
+            for (var defined : definedOps) {
+                nodes.computeIfAbsent(defined, k -> new DFGNode(k));
+            }
+            for (var use : soNNode.getUses()) {
+                if (nodeSet.contains(use))
+                    continue;
+                nodeSet.add(use);
+                worklist.push(use);
+            }
+        }
+        worklist.addAll(sng.workroots());
+        nodeSet.clear();
+        while (!worklist.isEmpty()) {
+            SoNNode soNNode = worklist.pop();
+            List<PcodeOp> definedOps = soNNode.getDefinedOps();
+            for (var defined : definedOps) {
+                var dnode = nodes.get(defined);
+                for (var use : soNNode.getDataUses()) {
+                    for (var useOp : use.getDefinedOps()) {
+                        var duse = nodes.get(useOp);
+                        dnode.addUse(duse);
+                    }
+                }
+            }
+            for (var use : soNNode.getUses()) {
+                if (nodeSet.contains(use))
+                    continue;
+                nodeSet.add(use);
+                worklist.push(use);
+            }
+        }
+        return new DFGFunction(fva, nodes.values());
+    }
+
+    public DFGFunction constructDFG(CFGFunction cfgFunction) {
+        DFGNode.clearIdCount();
+        SoNGraphBuilder builder = new SoNGraphBuilder(cfgFunction, this);
+        SoNGraph sng = builder.build();
+        return constructDFGFromSNG(cfgFunction.getAddress(), sng);
+    }
+
     public <T extends DAGNode<T>> JSONObject dumpGraph(DAGGraph<T> graph, int verb_level) {
         JSONObject funcOut = new JSONObject();
         ArrayList<Integer> nodes = new ArrayList<Integer>();
@@ -353,7 +446,7 @@ public class GraphFactory {
         Stack<T> worklist = new Stack<>();
         Set<T> nodeSet = new HashSet<>();
         String featKey = (verb_level == 0) ? "node_mnems" : "node_asms";
-        worklist.push(graph.root());
+        worklist.addAll(graph.workroots());
         while (!worklist.isEmpty()) {
             T node = worklist.pop();
             nodes.add(node.id());

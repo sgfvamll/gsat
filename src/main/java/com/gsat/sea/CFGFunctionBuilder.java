@@ -6,7 +6,6 @@ import java.util.Stack;
 import java.util.TreeMap;
 
 import com.gsat.sea.CFGBlock.OpSite;
-import com.gsat.sea.analysis.DAGGraph;
 import com.gsat.sea.analysis.SCC;
 
 import ghidra.program.model.address.Address;
@@ -20,7 +19,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 
-public class CFGFunctionBuilder implements DAGGraph<CFGBlock> {
+public class CFGFunctionBuilder {
     Address fva;
     Function function;
     CFGBlock root;

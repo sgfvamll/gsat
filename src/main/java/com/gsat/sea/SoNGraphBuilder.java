@@ -79,8 +79,8 @@ public class SoNGraphBuilder {
             return state.entrySet();
         }
 
-        protected SoNNode handleSubPiece(SoNNode input, int outSize, long offset) {
-            return SoNNode.newProject(input, outSize, offset);
+        protected SoNNode handleSubPiece(SoNNode input, int outSize, long offset, Varnode defined) {
+            return SoNNode.newProject(input, outSize, offset, defined);
         }
 
         protected abstract SoNNode handleUndefined(AddressInterval interval);
@@ -107,6 +107,7 @@ public class SoNGraphBuilder {
         }
 
         public SoNNode peek(AddressInterval requiredRange) {
+            Varnode requiredRangeNode = requiredRange.toVarnode();
             var sEntry = state.floorEntry(requiredRange);
             if (sEntry != null && sEntry.getKey().equals(requiredRange)) {
                 return eget(sEntry); /// defStack is ensured non-empty
@@ -140,9 +141,10 @@ public class SoNGraphBuilder {
                 long intersectedLen = intersected.getLength();
                 long offset = intersectedMin.subtract(entry.getKey().getMinAddress());
                 SoNNode project, input = eget(entry);
-                if (intersectedLen != entry.getKey().getLength())
-                    project = handleSubPiece(input, (int) intersectedLen, offset);
-                else
+                if (intersectedLen != entry.getKey().getLength()) {
+                    Varnode defined = new Varnode(intersectedMin, (int) intersectedLen);
+                    project = handleSubPiece(input, (int) intersectedLen, offset, defined);
+                } else
                     project = input;
                 subPieces.add(project);
                 requiredRange = requiredRange.removeFromStart(intersectedLen);
@@ -162,8 +164,10 @@ public class SoNGraphBuilder {
             if (subPieces.size() == 1) {
                 result = subPieces.get(0);
             } else {
+
+                
                 assert subPieces.size() > 1;
-                result = SoNNode.newPiece(subPieces.size());
+                result = SoNNode.newPiece(subPieces.size(), requiredRangeNode);
                 int i = 0;
                 for (SoNNode part : subPieces) {
                     result.setUse(i++, part);
@@ -202,7 +206,8 @@ public class SoNGraphBuilder {
                 for (AddressInterval remaining : eKey.substract(intersected)) {
                     long subPieceOffset = remaining.getMinAddress().subtract(eKey.getMinAddress());
                     int subPieceSize = (int) remaining.getLength();
-                    SoNNode subPiece = handleSubPiece(eget(entry), subPieceSize, subPieceOffset);
+                    Varnode defined = remaining.toVarnode();
+                    SoNNode subPiece = handleSubPiece(eget(entry), subPieceSize, subPieceOffset, defined);
                     newView.add(new Pair<>(remaining, subPiece));
                 }
             }
@@ -279,7 +284,7 @@ public class SoNGraphBuilder {
         // Sizes of defined SoN nodes are flex and no subpieces needed. 
         //      This is why the word 'semi-def' is used. 
         @Override
-        protected SoNNode handleSubPiece(SoNNode input, int outSize, long offset) {
+        protected SoNNode handleSubPiece(SoNNode input, int outSize, long offset, Varnode defined) {
             return new SoNNode(input);
         }
 
@@ -492,7 +497,8 @@ public class SoNGraphBuilder {
                     int numPre = nodes.get(blId).getPredecessors().size();
                     int phiType = ndefs.getKey().equals(effectNode) ? 3
                             : (ndefs.getKey().getSpace() == sotreSpaceId ? 2 : 0);
-                    blPhiDefs.put(interval, SoNNode.newPhi(regions.get(blId), numPre, phiType));
+                    blPhiDefs.put(interval, SoNNode.newPhi(
+                        regions.get(blId), ndefs.getKey(), numPre, phiType));
                     if (!ndefs.getValue().contains(blId))
                         worklist.push(blId);
                 }
@@ -507,7 +513,8 @@ public class SoNGraphBuilder {
             for (PcodeOp op : n.getPcodeOps()) {
                 if (op.getOpcode() != PcodeOp.MULTIEQUAL)
                     break;
-                SoNNode phi = SoNNode.newPhi(regions.get(blId), op.getNumInputs(), 0);
+                SoNNode phi = SoNNode.newPhi(regions.get(blId), op, 0);
+                phi.addDefinedOp(op);
                 phiMap.put(op, phi);
             }
         }
@@ -596,9 +603,9 @@ public class SoNGraphBuilder {
             int occurence = occurenceMap.get(succ.id());
             int inOrder = succ.getPredIdx(bl, occurence);
             occurenceMap.put(succ.id(), occurence + 1);
-            int j = SoNOp.dataUseStart(PcodeOp.MULTIEQUAL) + inOrder;
+            int j = inOrder;
             for (var entry : phiDefs.get(succ.id()).entrySet()) {
-                entry.getValue().setUse(j, state.peekOrNew(entry.getKey()));
+                entry.getValue().setPhiUse(j, state.peekOrNew(entry.getKey()));
             }
             for (PcodeOp op : succ.getPcodeOps()) {
                 if (op.getOpcode() != PcodeOp.MULTIEQUAL)
@@ -606,7 +613,7 @@ public class SoNGraphBuilder {
                 if (inOrder >= op.getNumInputs())
                     continue;
                 Varnode in = op.getInput(inOrder);
-                phiMap.get(op).setUse(j, state.peekOrNew(in));
+                phiMap.get(op).setPhiUse(j, state.peekOrNew(in));
             }
         }
     }

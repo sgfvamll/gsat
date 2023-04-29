@@ -23,6 +23,8 @@ public class SoNNode implements DAGNode<SoNNode> {
     private int[] numUsesPerType; // 0-data, 1-control, 2-memory effect, 3-other effect
     private BaseOp op; // op is allowed to be shared by multiple nodes and should be immutable. 
     List<SoNNode> uses;
+    List<PcodeOp> definedOps; // Pcode ops that define this node. 
+    Varnode definedNode = null;
 
     public SoNNode(BaseOp operation, int initUses) {
         id = idCnt++;
@@ -33,6 +35,7 @@ public class SoNNode implements DAGNode<SoNNode> {
         numUsesPerType = new int[nUsesType];
         Arrays.fill(numUsesPerType, 0);
         numUsesPerType[0] = initUses;
+        definedOps = new ArrayList<>();
     }
 
     public SoNNode(SoNNode node) {
@@ -43,6 +46,7 @@ public class SoNNode implements DAGNode<SoNNode> {
         numUsesPerType = new int[nUsesType];
         for (int i = 0; i < nUsesTypes; i++)
             numUsesPerType[i] = node.numUsesPerType[i];
+        definedOps.addAll(node.definedOps);
     }
 
     private SoNNode(int opc, int initUses) {
@@ -95,11 +99,34 @@ public class SoNNode implements DAGNode<SoNNode> {
             return new String[] { mnemonic() };
     }
 
+    public void addDefinedOp(PcodeOp op) {
+        definedOps.add(op);
+    }
+
+    public List<PcodeOp> getDefinedOps() {
+        return definedOps;
+    }
+
+    public Varnode getDefinedVarnode() {
+        return definedNode;
+    }
+
     public List<SoNNode> getUses() {
         return uses;
     }
 
+    public List<SoNNode> getDataUses() {
+        return uses.subList(0, numUsesPerType[0]);
+    }
+
     void setUse(int idx, SoNNode inp) {
+        uses.set(idx, inp);
+    }
+
+    void setPhiUse(int idx, SoNNode inp) {
+        if (numDataUses() == 0) 
+            // effect phi, skip the region input.  
+            idx += 1;   
         uses.set(idx, inp);
     }
 
@@ -110,6 +137,10 @@ public class SoNNode implements DAGNode<SoNNode> {
             insertAt += numUsesPerType[i];
         uses.add(insertAt, inp);
         numUsesPerType[type] += 1;
+    }
+
+    int numDataUses() {
+        return numUsesPerType[0];
     }
 
     void addDataUse(SoNNode inp) {
@@ -138,6 +169,8 @@ public class SoNNode implements DAGNode<SoNNode> {
             default:
                 result = new SoNNode(opc, SoNOp.numDataUseOfPcodeOp(op));
         }
+        result.definedOps.add(op);
+        result.definedNode = op.getOutput();
         return result;
     }
 
@@ -151,18 +184,22 @@ public class SoNNode implements DAGNode<SoNNode> {
     }
 
     public static SoNNode newStoreOrConst(AddressSpace space, long offset, int size) {
+        SoNNode result;
         if (space == GraphFactory.getStoreSpace()) {
-            return SoNNode.newMemorySpace(offset); // represents the entire memory space 
+            result = SoNNode.newMemorySpace(offset); // represents the entire memory space 
         } else if (space.isConstantSpace()) {
-            return SoNNode.newConstant(offset, size);
+            result = SoNNode.newConstant(offset, size);
         } else if (space.isRegisterSpace()) {
-            return SoNNode.newRegisterStore(offset, size); // one register store
+            result = SoNNode.newRegisterStore(offset, size); // one register store
         } else if (space.isMemorySpace()) {
-            return SoNNode.newMemoryStore(offset, size); // one memory store
+            result = SoNNode.newMemoryStore(offset, size); // one memory store
         } else if (space.isStackSpace()) {
-            return SoNNode.newStackStore(offset, size); // one stack store
+            result = SoNNode.newStackStore(offset, size); // one stack store
+        } else {
+            result = SoNNode.newOtherStore(space.getSpaceID(), offset, size);
         }
-        return SoNNode.newOtherStore(space.getSpaceID(), offset, size);
+        result.definedNode = new Varnode(space.getAddress(offset), size);
+        return result;
     }
 
     public static SoNNode newRegion(PcodeOp last) {
@@ -185,6 +222,7 @@ public class SoNNode implements DAGNode<SoNNode> {
                     controlNode = SoNNode.newBrRegion(0);
                     break;
             }
+            controlNode.definedOps.add(last);
         }
         return controlNode;
     }
@@ -209,13 +247,20 @@ public class SoNNode implements DAGNode<SoNNode> {
         return new SoNNode(new ReturnRegion(), numUses);
     }
 
-    public static SoNNode newPhi(SoNNode region, int numUses, int type) {
+    public static SoNNode newPhi(SoNNode region, PcodeOp op, int type) {
+        SoNNode phi = newPhi(region, op.getOutput(), op.getNumInputs(), type);
+        phi.definedOps.add(op);
+        return phi;
+    }
+
+    public static SoNNode newPhi(SoNNode region, Varnode defined, int numUses, int type) {
         int numDataUses = type != 0 ? 0 : numUses;
         int numEffectUses = type != 0 ? numUses : 0;
         SoNNode phi = new SoNNode(new Phi(), numDataUses);
         phi.addControlUse(region);
         for (int i = 0; i < numEffectUses; i++)
             phi.addUse(type, null);
+        phi.definedNode = defined;
         return phi;
     }
 
@@ -224,10 +269,11 @@ public class SoNNode implements DAGNode<SoNNode> {
         return new SoNNode(op, 2);
     }
 
-    public static SoNNode newProject(SoNNode input, int outSize, long offset) {
+    public static SoNNode newProject(SoNNode input, int outSize, long offset, Varnode defined) {
         SoNNode project = SoNNode.newProject(outSize);
         project.setUse(0, input);
         project.setUse(1, SoNNode.newConstant(offset, 8));
+        project.definedNode = defined;
         return project;
     }
 
@@ -238,8 +284,10 @@ public class SoNNode implements DAGNode<SoNNode> {
         return project;
     }
 
-    public static SoNNode newPiece(int numDataUses) {
-        return new SoNNode(PcodeOp.PIECE, numDataUses);
+    public static SoNNode newPiece(int numDataUses, Varnode defined) {
+        SoNNode r = new SoNNode(PcodeOp.PIECE, numDataUses);
+        r.definedNode = defined;
+        return r;
     }
 
     public static SoNNode newMemorySpace(long spaceId) {

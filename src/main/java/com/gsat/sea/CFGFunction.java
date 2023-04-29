@@ -3,6 +3,7 @@ package com.gsat.sea;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.Collection;
 import java.util.HashSet;
 
 import com.gsat.sea.analysis.DAGGraph;
@@ -32,6 +33,10 @@ public class CFGFunction implements DAGGraph<CFGBlock> {
 
     public CFGBlock root() {
         return blocks.get(0);
+    }
+
+    public Collection<CFGBlock> workroots() {
+        return blocks;
     }
 
     public List<CFGBlock> getBlocks() {

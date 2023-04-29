@@ -22,6 +22,10 @@ public class AddressInterval implements Comparable<AddressInterval> {
         return new AddressInterval(varnode.getAddress(), varnode.getSize());
     }
 
+    public Varnode toVarnode() {
+        return new Varnode(minAddress, (int) size);
+    } 
+
     AddressInterval(Address start, long length) {
         this.minAddress = start;
         this.size = length;

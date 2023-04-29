@@ -48,7 +48,6 @@ public class SoNOp {
         switch (opc) {
             case PcodeOp.BRANCH:
             case PcodeOp.CBRANCH:
-            case PcodeOp.MULTIEQUAL: // First use is the region. 
             case PcodeOp.LOAD:
             case PcodeOp.STORE:
                 return 1;
