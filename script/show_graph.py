@@ -164,10 +164,6 @@ def randAbs(low, high):
     x = random.random() * (high-low) + low
     return x if random.random() < 0.5 else -x
 
-def asm_key():
-    # return 'node_mnems'
-    return 'node_asms'
-
 if __name__ == "__main__":
     graph_fp = sys.argv[1]
     filter_rule = sys.argv[2]
@@ -181,6 +177,7 @@ if __name__ == "__main__":
     graph_data = graph_data[list(graph_data.keys())[0]]
     min_nodes = 100000
     for fva, func_data in graph_data.items():
+        func_data = func_data['SOG']
         nodes = func_data['nodes']
         edges = func_data['edges']
         if len(nodes) < min_nodes:
@@ -193,8 +190,8 @@ if __name__ == "__main__":
         graph = create_graph(nodes, edges)
         print(fva, graph)
         nodes_verbs = [
-            (int(nid), mnem_data[asm_key()][0])
-            for nid, mnem_data in func_data['nodes_verbs'].items()
+            (int(nid), mnem_data[0])
+            for nid, mnem_data in func_data['nverbs'].items()
         ]
         labels = dict([
             (nid, str(nid) + ' ' + mnem) for nid, mnem in nodes_verbs

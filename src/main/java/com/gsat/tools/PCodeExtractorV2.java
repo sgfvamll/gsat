@@ -9,7 +9,8 @@ import org.json.*;
 import com.gsat.helper.AnalysisHelper;
 import com.gsat.sea.GraphFactory;
 import com.gsat.sea.CFGFunction;
-import com.gsat.sea.DFGFunction;
+import com.gsat.sea.SIGFunction;
+import com.gsat.sea.STGFunction;
 import com.gsat.sea.SoNGraph;
 import com.gsat.utils.ColoredPrint;
 import com.gsat.utils.CommonUtils;
@@ -24,10 +25,14 @@ public class PCodeExtractorV2 extends BaseTool {
     String outputFormat;
     int verbose_level = 0;
     int extraction_mode = 0;
+    boolean preferRawPcode = true;
     String debugged_func;
 
     public PCodeExtractorV2() {
-        this.analysisMode = 1; /// Fast analysis
+        if (preferRawPcode)
+            this.analysisMode = 1;
+        else
+            this.analysisMode = 3;
     }
 
     public static String getName() {
@@ -41,7 +46,7 @@ public class PCodeExtractorV2 extends BaseTool {
                 new Option("va", "function_vaddress", true, "The function to be dumpped. "),
                 new Option("c", "cfg_file", true,
                         "Path to a json file that contains all selected functions along with its CFG (i.e. *_cfg_disasm.json). "),
-                new Option("of", "output_format", true, "One of {'ACFG', 'DFG', 'SoN', 'tSoN'}"),
+                new Option("of", "output_format", true, "One of {'ACFG', 'SIG', 'SoN', 'tSoN', ALL}"),
                 new Option("v", "verbose_level", true, "`0` for mnems only and `1` for full. "),
         };
     }
@@ -86,7 +91,7 @@ public class PCodeExtractorV2 extends BaseTool {
 
     private void dumpOneFunc(JSONObject oneCfgJson) {
         GraphFactory graphFactory = new GraphFactory(program);
-        CFGFunction cfgFunction = graphFactory.constructCfgProgramFromCFGSummary(oneCfgJson);
+        CFGFunction cfgFunction = graphFactory.constructCfgProgramFromCFGSummary(oneCfgJson, preferRawPcode);
         String dumppedCfgFunction = graphFactory.debugCfgFunction(cfgFunction);
         if (outputFile != null) {
             CommonUtils.writeString(dumppedCfgFunction, outputFile);
@@ -142,7 +147,7 @@ public class PCodeExtractorV2 extends BaseTool {
             // if (oneCfgJson.getString("start_ea").equals("0x128df0")) {
             //     ColoredPrint.info("123");
             // }
-            CFGFunction cfgFunction = graphFactory.constructCfgProgramFromCFGSummary(oneCfgJson);
+            CFGFunction cfgFunction = graphFactory.constructCfgProgramFromCFGSummary(oneCfgJson, preferRawPcode);
             if (cfgFunction == null) {
                 errorFuncs.add(oneCfgJson.getString("start_ea"));
                 continue;
@@ -152,13 +157,31 @@ public class PCodeExtractorV2 extends BaseTool {
                 case "ACFG":
                     dumppedGraph = graphFactory.dumpGraph(cfgFunction, verbose_level);
                     break;
-                case "DFG":
-                    DFGFunction dfg = graphFactory.constructDFG(cfgFunction);
+                case "SIG":
+                    SIGFunction dfg = graphFactory.constructSIG(cfgFunction);
                     dumppedGraph = graphFactory.dumpGraph(dfg, verbose_level);
                     break;
                 case "SoN":
                     SoNGraph graph = graphFactory.constructSeaOfNodes(cfgFunction);
                     dumppedGraph = graphFactory.dumpGraph(graph, verbose_level);
+                    break;
+                case "ALL":
+                    dumppedGraph = new JSONObject();
+                    dumppedGraph.put("PcodeLevel", cfgFunction.pcodeLevel());
+                    JSONObject g = graphFactory.dumpGraph(cfgFunction, verbose_level);
+                    dumppedGraph.put("ACFG", g);
+                    long liftingSNGStart = System.nanoTime();
+                    SoNGraph sngGraph = graphFactory.constructSeaOfNodes(cfgFunction);
+                    long liftingSNGEnd = System.nanoTime();
+                    g = graphFactory.dumpGraph(sngGraph, verbose_level);
+                    g.put("LiftingCost_ns", liftingSNGEnd - liftingSNGStart);
+                    dumppedGraph.put("SOG", g);
+                    SIGFunction sig = graphFactory.constructSIGFromSNG(cfgFunction.getAddress(), sngGraph);
+                    g = graphFactory.dumpGraph(sig, verbose_level);
+                    dumppedGraph.put("SIG", g);
+                    STGFunction stg = graphFactory.constructSTGFromSNG(cfgFunction.getAddress(), sngGraph);
+                    g = graphFactory.dumpGraph(stg, verbose_level);
+                    dumppedGraph.put("STG", g);
                     break;
             }
             binOut.putOpt((String) oneCfgJson.get("start_ea"), dumppedGraph);
@@ -173,7 +196,7 @@ public class PCodeExtractorV2 extends BaseTool {
         JSONObject binOutWrap = new JSONObject();
         binOutWrap.put(idb_path, binOut);
         if (outputFile != null) {
-            CommonUtils.writeString(binOutWrap.toString(), outputFile);
+            CommonUtils.writeJson(binOutWrap, outputFile);
             ColoredPrint.info("[*] Results saved at %s", outputFile);
         } else {
             System.console().printf(binOutWrap.toString(4));

@@ -6,6 +6,7 @@ import java.io.File;
 import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -64,6 +65,15 @@ public class CommonUtils {
                     e.printStackTrace();
                 }
             }
+        }
+    }
+
+    public static void writeJson(JSONObject obj, String savePath) {
+        try (final Writer writer = new FileWriter(new File(savePath))) {
+            obj.write(writer);
+        }
+        catch (IOException e) {
+            e.printStackTrace();
         }
     }
 

@@ -11,6 +11,7 @@ import com.gsat.sea.analysis.SCC;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.SequenceNumber;
 import ghidra.program.model.pcode.Varnode;
@@ -72,8 +73,8 @@ public class CFGFunctionBuilder {
         return result;
     }
 
-    public CFGFunction finalizeFuncion(boolean use_raw_pcode) {
-        return new CFGFunction(fva, getBlocks(), use_raw_pcode);
+    public CFGFunction finalizeFuncion(int pcodeLevel, HighFunction hfunc) {
+        return new CFGFunction(fva, getBlocks(), pcodeLevel, hfunc);
     }
 
     public int getNumBlocks() {

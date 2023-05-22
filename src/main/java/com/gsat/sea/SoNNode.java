@@ -47,6 +47,7 @@ public class SoNNode implements DAGNode<SoNNode> {
         for (int i = 0; i < nUsesTypes; i++)
             numUsesPerType[i] = node.numUsesPerType[i];
         definedOps.addAll(node.definedOps);
+        definedNode = node.definedNode;
     }
 
     private SoNNode(int opc, int initUses) {
@@ -139,6 +140,10 @@ public class SoNNode implements DAGNode<SoNNode> {
         numUsesPerType[type] += 1;
     }
 
+    int numUses() {
+        return uses.size();
+    }
+
     int numDataUses() {
         return numUsesPerType[0];
     }
@@ -165,6 +170,9 @@ public class SoNNode implements DAGNode<SoNNode> {
         switch (opc) {
             case PcodeOp.SUBPIECE:
                 result = newProject(op.getOutput().getSize());
+                break;
+            case PcodeOp.INDIRECT:
+                result = new SoNNode(opc, 1);
                 break;
             default:
                 result = new SoNNode(opc, SoNOp.numDataUseOfPcodeOp(op));
@@ -254,6 +262,7 @@ public class SoNNode implements DAGNode<SoNNode> {
     }
 
     public static SoNNode newPhi(SoNNode region, Varnode defined, int numUses, int type) {
+        assert defined != null && region != null;
         int numDataUses = type != 0 ? 0 : numUses;
         int numEffectUses = type != 0 ? numUses : 0;
         SoNNode phi = new SoNNode(new Phi(), numDataUses);

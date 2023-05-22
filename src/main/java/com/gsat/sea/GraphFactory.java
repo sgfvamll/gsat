@@ -1,6 +1,8 @@
 package com.gsat.sea;
 
+import java.io.Console;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -186,31 +188,47 @@ public class GraphFactory {
         return new PcodeOp(address, 0, PcodeOp.COPY, new Varnode[] { inout }, inout);
     }
 
-    public CFGFunction constructCfgProgramFromCFGSummary(JSONObject cfgInfo) {
-        if (cfgInfo.has("nodes"))
-            return constructCfgProgramFromCFGSummaryV2(cfgInfo);
-        else
-            return constructCfgProgramFromCFGSummaryV1(cfgInfo);
+    public CFGFunction constructCfgProgramFromCFGSummary(JSONObject cfgInfo, boolean preferRawPcode) {
+        CFGFunction result;
+        if (preferRawPcode && cfgInfo.has("nodes") && cfgInfo.has("nodes"))
+            result = constructCfgProgramFromCFGSummaryRawMode(cfgInfo);
+        else {
+            result = constructCfgProgramFromCFGSummaryOptMode(cfgInfo);
+            if (result == null && cfgInfo.has("nodes"))
+                return constructCfgProgramFromCFGSummaryRawMode(cfgInfo);
+        }
+        return result;
     }
 
-    public CFGFunction constructCfgProgramFromCFGSummaryV1(JSONObject cfgInfo) {
+    public CFGFunction constructCfgProgramFromCFGSummaryOptMode(JSONObject cfgInfo) {
         AddressFactory addressFactory = program.getAddressFactory();
         Address startEa = addressFactory.getAddress(cfgInfo.getString("start_ea"));
-        Address endEa = addressFactory.getAddress(cfgInfo.getString("end_ea"));
-        Address maxEa = endEa.subtract(1);
-        AddressSet body = addressFactory.getAddressSet(startEa, maxEa);
+        // Address endEa = addressFactory.getAddress(cfgInfo.getString("end_ea"));
+        // Address maxEa = endEa.subtract(1);
+        // AddressSet body = addressFactory.getAddressSet(startEa, maxEa);
         if (decompInterface1 == null) {
             decompInterface1 = setUpDecompiler("normalize");
             decompInterface2 = setUpDecompiler("firstpass");
         }
-        HighFunction hfunc = checkedGetHFuncContaining(body, decompInterface1);
+        // HighFunction hfunc = checkedGetHFuncContaining(body, decompInterface1);
+        // if (hfunc == null) {
+        //     // Give another try with different settings. 
+        //     // Pcode generated using 'firstpass' style still has MULTIEQUAL. 
+        //     // That is, not in raw pcode form. 
+        //     hfunc = checkedGetHFuncContaining(body, decompInterface2);
+        //     if (hfunc == null)
+        //         return null;
+        // }
+        int pcodeLevel = 2;
+        HighFunction hfunc = checkedGetHFuncAt(startEa, decompInterface1);
         if (hfunc == null) {
             // Give another try with different settings. 
             // Pcode generated using 'firstpass' style still has MULTIEQUAL. 
             // That is, not in raw pcode form. 
-            hfunc = checkedGetHFuncContaining(body, decompInterface2);
+            hfunc = checkedGetHFuncAt(startEa, decompInterface2);
             if (hfunc == null)
                 return null;
+            pcodeLevel = 1;
         }
         HashMap<SequenceNumber, CFGBlock> blockMap = new HashMap<>();
         Function function = hfunc.getFunction();
@@ -234,7 +252,7 @@ public class GraphFactory {
         builder.fixMultipleHeads();
         builder.fixNoReturn();
         builder.resolveTailBranches(this);
-        return builder.finalizeFuncion(false);
+        return builder.finalizeFuncion(pcodeLevel, hfunc);
     }
 
     /// Does not handle indirected branch. 
@@ -279,10 +297,10 @@ public class GraphFactory {
 
         builder.fixFlow();
         builder.resolveTailBranches(this);
-        return builder.finalizeFuncion(true);
+        return builder.finalizeFuncion(0, null);
     }
 
-    public CFGFunction constructCfgProgramFromCFGSummaryV2(JSONObject cfgInfo) {
+    public CFGFunction constructCfgProgramFromCFGSummaryRawMode(JSONObject cfgInfo) {
         AddressFactory addressFactory = program.getAddressFactory();
         Address fva = addressFactory.getAddress(cfgInfo.getString("start_ea"));
         JSONArray nodes = cfgInfo.getJSONArray("nodes");
@@ -340,7 +358,7 @@ public class GraphFactory {
         }
         builder.fixFlow();
         builder.resolveTailBranches(this);
-        return builder.finalizeFuncion(true);
+        return builder.finalizeFuncion(0, null);
     }
 
     public SoNGraph constructSeaOfNodes(CFGFunction cfgFunction) {
@@ -357,12 +375,12 @@ public class GraphFactory {
         if (opc == -2) {
             ConstantLong longOp = (ConstantLong) soNNode.op();
             soNNode.definedNode = new Varnode(
-                constantSpace.getAddress(longOp.constant), longOp.size);
+                    constantSpace.getAddress(longOp.constant), longOp.size);
         } else if (opc == -4) {
             MemorySpace space = (MemorySpace) soNNode.op();
             soNNode.definedNode = new Varnode(storeSpace.getAddress(space.id), 0);
         } else if (opc == -7) {
-            Store store = (Store) soNNode.op(); 
+            Store store = (Store) soNNode.op();
             Address a = program.getAddressFactory().getStackSpace().getAddress(store.id);
             soNNode.definedNode = new Varnode(a, store.size);
         }
@@ -383,9 +401,9 @@ public class GraphFactory {
         return new PcodeOp(null, opc, inputs.toArray(new Varnode[0]), definedNode);
     }
 
-    public DFGFunction constructDFGFromSNG(Address fva, SoNGraph sng) {
+    public SIGFunction constructSIGFromSNG(Address fva, SoNGraph sng) {
         Stack<SoNNode> worklist = new Stack<>();
-        Map<PcodeOp, DFGNode> nodes = new IdentityHashMap<>();
+        Map<PcodeOp, SIGNode> nodes = new IdentityHashMap<>();
         Set<SoNNode> nodeSet = new HashSet<>();
         worklist.addAll(sng.workroots());
         nodeSet.addAll(worklist);
@@ -394,11 +412,13 @@ public class GraphFactory {
             List<PcodeOp> definedOps = soNNode.getDefinedOps();
             if (definedOps.size() == 0) {
                 var created = generatPcodeOpFromSoNNode(soNNode);
+                // Non-pcodeop node or not null
+                assert soNNode.opcode() <= -1 || created != null;
                 if (created != null)
                     definedOps.add(created);
             }
             for (var defined : definedOps) {
-                nodes.computeIfAbsent(defined, k -> new DFGNode(k));
+                nodes.computeIfAbsent(defined, k -> new SIGNode(k));
             }
             for (var use : soNNode.getUses()) {
                 if (nodeSet.contains(use))
@@ -411,13 +431,73 @@ public class GraphFactory {
         nodeSet.clear();
         while (!worklist.isEmpty()) {
             SoNNode soNNode = worklist.pop();
-            List<PcodeOp> definedOps = soNNode.getDefinedOps();
-            for (var defined : definedOps) {
+            for (var defined : soNNode.getDefinedOps()) {
                 var dnode = nodes.get(defined);
-                for (var use : soNNode.getDataUses()) {
-                    for (var useOp : use.getDefinedOps()) {
-                        var duse = nodes.get(useOp);
-                        dnode.addUse(duse);
+                var uses = soNNode.getUses();
+                for (int i = 0; i < uses.size(); i++) {
+                    int ty = soNNode.getEdgeType(i) - 1;
+                    for (var useOp : uses.get(i).getDefinedOps()) 
+                        dnode.addUse(ty, nodes.get(useOp));
+                }
+            }
+            for (var use : soNNode.getUses()) {
+                if (nodeSet.contains(use))
+                    continue;
+                nodeSet.add(use);
+                worklist.push(use);
+            }
+        }
+        return new SIGFunction(fva, nodes.values());
+    }
+
+    public STGFunction constructSTGFromSNG(Address fva, SoNGraph sng) {
+        Stack<SoNNode> worklist = new Stack<>();
+        Map<PcodeOp, STGNode> opnodes = new IdentityHashMap<>();
+        Map<Varnode, STGNode> varnodes = new IdentityHashMap<>();
+        Set<SoNNode> nodeSet = new HashSet<>();
+        worklist.addAll(sng.workroots());
+        nodeSet.addAll(worklist);
+        while (!worklist.isEmpty()) {
+            SoNNode soNNode = worklist.pop();
+            List<PcodeOp> definedOps = soNNode.getDefinedOps();
+            if (definedOps.size() == 0) {
+                var created = generatPcodeOpFromSoNNode(soNNode);
+                // Non-pcodeop node or not null
+                assert soNNode.opcode() <= -1 || created != null;
+                if (created != null)
+                    definedOps.add(created);
+            }
+            STGNode varnode = null;
+            if (soNNode.definedNode != null)
+                varnode = varnodes.computeIfAbsent(soNNode.definedNode, k -> new STGNode(k));
+            for (var defined : definedOps) {
+                STGNode opnode = opnodes.computeIfAbsent(defined, k -> new STGNode(k));
+                if (varnode != null)
+                    varnode.addUse(0, opnode);
+            }
+            for (var use : soNNode.getUses()) {
+                if (nodeSet.contains(use))
+                    continue;
+                nodeSet.add(use);
+                worklist.push(use);
+            }
+        }
+        worklist.addAll(sng.workroots());
+        nodeSet.clear();
+        while (!worklist.isEmpty()) {
+            SoNNode soNNode = worklist.pop();
+            for (var defined : soNNode.getDefinedOps()) {
+                var dnode = opnodes.get(defined);
+                var uses = soNNode.getUses();
+                for (int i = 0; i < uses.size(); i++) {
+                    int ty = soNNode.getEdgeType(i) - 1;
+                    SoNNode use = uses.get(i);
+                    if (ty != 0)
+                        for (var useOp : use.getDefinedOps()) 
+                            dnode.addUse(ty, opnodes.get(useOp));
+                    else {
+                        assert use.definedNode != null;
+                        dnode.addUse(ty, varnodes.get(use.definedNode));
                     }
                 }
             }
@@ -428,14 +508,17 @@ public class GraphFactory {
                 worklist.push(use);
             }
         }
-        return new DFGFunction(fva, nodes.values());
+        ArrayList<STGNode> nodes = new ArrayList<>();
+        nodes.addAll(opnodes.values());
+        nodes.addAll(varnodes.values());
+        return new STGFunction(fva, nodes);
     }
 
-    public DFGFunction constructDFG(CFGFunction cfgFunction) {
-        DFGNode.clearIdCount();
+    public SIGFunction constructSIG(CFGFunction cfgFunction) {
+        SIGNode.clearIdCount();
         SoNGraphBuilder builder = new SoNGraphBuilder(cfgFunction, this);
         SoNGraph sng = builder.build();
-        return constructDFGFromSNG(cfgFunction.getAddress(), sng);
+        return constructSIGFromSNG(cfgFunction.getAddress(), sng);
     }
 
     public <T extends DAGNode<T>> JSONObject dumpGraph(DAGGraph<T> graph, int verb_level) {
@@ -445,8 +528,8 @@ public class GraphFactory {
         JSONObject nodesVerb = new JSONObject();
         Stack<T> worklist = new Stack<>();
         Set<T> nodeSet = new HashSet<>();
-        String featKey = (verb_level == 0) ? "node_mnems" : "node_asms";
         worklist.addAll(graph.workroots());
+        nodeSet.addAll(worklist);
         while (!worklist.isEmpty()) {
             T node = worklist.pop();
             nodes.add(node.id());
@@ -458,16 +541,14 @@ public class GraphFactory {
                     nodeSet.add(succ);
                 }
             }
-            JSONObject nodeOut = new JSONObject();
             String[] nodeMnems = node.getFeatureStrs(verb_level);
-            nodeOut.put(featKey, nodeMnems);
-            nodesVerb.put(String.format("%d", node.id()), nodeOut);
+            nodesVerb.put(String.format("%d", node.id()), nodeMnems);
         }
         /// It's unlikely that a selected function is so small...
         // assert nodes.size() >= 5;
         funcOut.put("nodes", nodes);
         funcOut.put("edges", edges);
-        funcOut.put("nodes_verbs", nodesVerb);
+        funcOut.put("nverbs", nodesVerb);
         return funcOut;
     }
 
@@ -697,6 +778,54 @@ public class GraphFactory {
             ColoredPrint.error(
                     "Decompile function failed! Function (start: %x, end: %x, body: %s)",
                     startEa.getOffset(), endEa.getOffset(), func.getBody());
+            ColoredPrint.error(dresult.getErrorMessage());
+            return null;
+        }
+        return hfunc;
+    }
+
+    private HighFunction checkedGetHFuncAt(Address startEa, DecompInterface decompInterface) {
+        Function func = program.getFunctionManager().getFunctionAt(startEa);
+        int trys = 0;
+
+        /// Check failed (1): Try disasmbling and re-create the function.
+        while (func == null) {
+            /// Create function if not valid.
+            int txId = program.startTransaction("CreateFunction");
+            AddressSetView toBeDecompiled = program.getAddressFactory()
+                    .getAddressSet(startEa, startEa.addWrap(1));
+            DisassembleCommand cmd = new DisassembleCommand(toBeDecompiled, null,
+                    true);
+            cmd.applyTo(program, TaskMonitor.DUMMY);
+            cmd.getDisassembledAddressSet();
+            CreateFunctionCmd fcmd = new CreateFunctionCmd(null, startEa, null, SourceType.DEFAULT, false, true);
+            fcmd.applyTo(program, TaskMonitor.DUMMY);
+            func = program.getListing().getFunctionAt(startEa);
+            program.endTransaction(txId, true);
+            if (func != null)
+                break;
+            trys += 1;
+            startEa = startEa.addWrap(1);
+            if (trys > 4)
+                break;
+        }
+
+        if (func == null) {
+            ColoredPrint.error(
+                    "Create function failed (start: %x) ", startEa.getOffset());
+            return null;
+        }
+
+        /// Decompile first, decompling may fix some previous wrong analysis.
+        int decompilingTimeSecs = 600;
+        DecompileResults dresult = decompInterface
+                .decompileFunction(func, decompilingTimeSecs, TaskMonitor.DUMMY);
+        HighFunction hfunc = dresult.getHighFunction();
+
+        if (hfunc == null) {
+            ColoredPrint.error(
+                    "Decompile function failed! Function (start: %x, body: %s)",
+                    startEa.getOffset(), func.getBody());
             ColoredPrint.error(dresult.getErrorMessage());
             return null;
         }

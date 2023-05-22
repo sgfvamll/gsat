@@ -74,8 +74,8 @@ public class AnalysisHelper {
         options.setBoolean("DWARF.Import Functions", true);
         options.setBoolean("DWARF.Create Function Signatures", true);
         program.endTransaction(txId, true);
-        disableConstantReferenceAnalysis(program);
 
+        // disableConstantReferenceAnalysis(program);
         // int txId = program.startTransaction("OptionChanged-enableSomeAnalysis");
         // Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
         // options.setBoolean("Shared Return Calls", true);

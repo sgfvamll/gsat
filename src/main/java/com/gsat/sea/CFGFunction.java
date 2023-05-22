@@ -9,26 +9,44 @@ import java.util.HashSet;
 import com.gsat.sea.analysis.DAGGraph;
 
 import ghidra.program.model.address.Address;
+import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 
 public class CFGFunction implements DAGGraph<CFGBlock> {
     Address fva;
-    boolean rawPcode;
+    int pcodeLevel;    // 0<-raw, 1<-firstpass, 2<-normalize
     List<CFGBlock> blocks;
+    HighFunction hfunc;
 
-    CFGFunction(Address start, List<CFGBlock> nodes, boolean useRawPcode) {
+    CFGFunction(Address start, List<CFGBlock> nodes, int usedPcodeLevel, HighFunction thisHfunc) {
         fva = start;
         blocks = nodes;
-        rawPcode = useRawPcode;
+        pcodeLevel = usedPcodeLevel;
+        hfunc = thisHfunc;
     }
 
     public Address getAddress() {
         return fva;
     }
 
+    public HighFunction getHighFunc() {
+        return hfunc;
+    }
+
     public boolean useRawPcode() {
-        return rawPcode;
+        return pcodeLevel == 0;
+    }
+
+    public String pcodeLevel() {
+        switch(pcodeLevel) {
+            case 0: return "raw";
+            case 1: return "firstpass";
+            case 2: return "normalize";
+            default:
+                assert false; 
+                return "unknown";
+        }
     }
 
     public CFGBlock root() {

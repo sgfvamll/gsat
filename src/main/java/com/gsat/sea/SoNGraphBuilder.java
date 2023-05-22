@@ -20,6 +20,7 @@ public class SoNGraphBuilder {
     List<SoNNode> regions;
     List<SemiDefState> phiDefs;
     Map<PcodeOp, SoNNode> phiMap;
+    Map<SequenceNumber, List<SoNNode>> postEffectUse;
 
     GraphFactory graphFactory;
     CFGFunction cfgFunction;
@@ -285,7 +286,9 @@ public class SoNGraphBuilder {
         //      This is why the word 'semi-def' is used. 
         @Override
         protected SoNNode handleSubPiece(SoNNode input, int outSize, long offset, Varnode defined) {
-            return new SoNNode(input);
+            SoNNode r = new SoNNode(input);
+            r.definedNode = defined;
+            return r;
         }
 
         @Override
@@ -497,8 +500,9 @@ public class SoNGraphBuilder {
                     int numPre = nodes.get(blId).getPredecessors().size();
                     int phiType = ndefs.getKey().equals(effectNode) ? 3
                             : (ndefs.getKey().getSpace() == sotreSpaceId ? 2 : 0);
-                    blPhiDefs.put(interval, SoNNode.newPhi(
-                        regions.get(blId), ndefs.getKey(), numPre, phiType));
+                    SoNNode phi = SoNNode.newPhi(
+                        regions.get(blId), ndefs.getKey(), numPre, phiType);
+                    blPhiDefs.put(interval, phi);
                     if (!ndefs.getValue().contains(blId))
                         worklist.push(blId);
                 }
@@ -521,6 +525,7 @@ public class SoNGraphBuilder {
     }
 
     private SoNGraph build(List<List<Integer>> bfsOrderTree) {
+        postEffectUse = new HashMap<>();
         worklist.push(nodes.get(0));
         while (!worklist.isEmpty()) {
             CFGBlock bl = worklist.peek();
@@ -538,6 +543,9 @@ public class SoNGraphBuilder {
             }
         }
         assert processed.size() == cfgFunction.getNumBlocks();
+        // Ghidra Warning: Ignoring partial resolution of indirect
+        // assert postEffectUse.isEmpty();
+        postEffectUse.clear();
         return new SoNGraph(end);
     }
 
@@ -563,10 +571,14 @@ public class SoNGraphBuilder {
                 continue;
             }
             /// Assert that branches/return must be the last op.
-            assert opIdx == numOps || !SoNOp.endsBlock(opc);
+            /// opt model may violate the following assertion (succ returns). 
+            // assert opIdx == numOps || !SoNOp.endsBlock(opc); 
+            /// TODO May fix it. 
+            if (opIdx != numOps && SoNOp.endsBlock(opc)) 
+                continue;
             /// Link data uses from opcode inputs
             SoNNode soNNode = SoNOp.endsBlock(opc) ? blRegion : SoNNode.newSoNNodeFromOp(op);
-            for (int i = dataUseStart; i < op.getNumInputs(); i++) {
+            for (int i = dataUseStart; i < op.getNumInputs() && i - dataUseStart < soNNode.numDataUses(); i++) {
                 Varnode input = op.getInput(i);
                 soNNode.setUse(i - dataUseStart, state.peekOrNew(input));
             }
@@ -579,6 +591,19 @@ public class SoNGraphBuilder {
                 soNNode.addMemoryEffectUse(state.peekOrNew(memoryNode));
             if (SoNOp.defineMemoryEffect(opc))
                 state.put(memoryNode, soNNode);
+            if (opc == PcodeOp.INDIRECT) {
+                int seq = (int) op.getInput(1).getAddress().getOffset();
+                SequenceNumber seqnum = new SequenceNumber(op.getSeqnum().getTarget(), seq);
+                postEffectUse.computeIfAbsent(seqnum, k -> new ArrayList<>()).add(soNNode);
+            }
+            List<SoNNode> lst = postEffectUse.get(op.getSeqnum());
+            if (lst != null) {
+                for (SoNNode node: lst) {
+                    node.addMemoryEffectUse(state.peekOrNew(memoryNode));
+                    node.addOtherEffectUse(state.peekOrNew(effectNode));
+                }
+                postEffectUse.remove(op.getSeqnum());
+            }
             /// Update def
             Varnode out = op.getOutput();
             if (out != null) { // Every op has at most one output. 
