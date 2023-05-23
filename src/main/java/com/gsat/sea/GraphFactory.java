@@ -190,7 +190,7 @@ public class GraphFactory {
 
     public CFGFunction constructCfgProgramFromCFGSummary(JSONObject cfgInfo, boolean preferRawPcode) {
         CFGFunction result;
-        if (preferRawPcode && cfgInfo.has("nodes") && cfgInfo.has("nodes"))
+        if (preferRawPcode && cfgInfo.has("nodes"))
             result = constructCfgProgramFromCFGSummaryRawMode(cfgInfo);
         else {
             result = constructCfgProgramFromCFGSummaryOptMode(cfgInfo);

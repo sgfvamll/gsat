@@ -42,6 +42,7 @@ public class PCodeExtractorV2 extends BaseTool {
     @Override
     Option[] getOptions() {
         return new Option[] {
+                new Option("opt", "opt_level", true, "Opt level of pcode. (0 or 1)"),
                 new Option("pm", "extraction_mode", true, "{default, debug_one}"),
                 new Option("va", "function_vaddress", true, "The function to be dumpped. "),
                 new Option("c", "cfg_file", true,
@@ -61,6 +62,16 @@ public class PCodeExtractorV2 extends BaseTool {
         }
         if (commandLine.hasOption("verbose_level"))
             verbose_level = Integer.parseInt(commandLine.getOptionValue("verbose_level"), 10);
+        if (commandLine.hasOption("opt_level")) {
+            int opt = Integer.parseInt(commandLine.getOptionValue("opt_level"), 10);
+            if (opt == 1) {
+                preferRawPcode = false;
+                this.analysisMode = 3;
+            } else {
+                preferRawPcode = true;
+                this.analysisMode = 1;
+            }
+        }
         if (commandLine.hasOption("extraction_mode")) {
             String mode = commandLine.getOptionValue("extraction_mode");
             if (mode.equals("debug_one")) {
