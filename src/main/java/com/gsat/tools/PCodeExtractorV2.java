@@ -47,7 +47,7 @@ public class PCodeExtractorV2 extends BaseTool {
                 new Option("va", "function_vaddress", true, "The function to be dumpped. "),
                 new Option("c", "cfg_file", true,
                         "Path to a json file that contains all selected functions along with its CFG (i.e. *_cfg_disasm.json). "),
-                new Option("of", "output_format", true, "One of {'ACFG', 'SIG', 'SoN', 'tSoN', ALL}"),
+                new Option("of", "output_format", true, "One of {'ACFG', 'SOG', 'ALL'}"),
                 new Option("v", "verbose_level", true, "`0` for mnems only and `1` for full. "),
         };
     }
@@ -168,11 +168,7 @@ public class PCodeExtractorV2 extends BaseTool {
                 case "ACFG":
                     dumppedGraph = graphFactory.dumpGraph(cfgFunction, verbose_level);
                     break;
-                case "SIG":
-                    SIGFunction dfg = graphFactory.constructSIG(cfgFunction);
-                    dumppedGraph = graphFactory.dumpGraph(dfg, verbose_level);
-                    break;
-                case "SoN":
+                case "SOG":
                     SoNGraph graph = graphFactory.constructSeaOfNodes(cfgFunction);
                     dumppedGraph = graphFactory.dumpGraph(graph, verbose_level);
                     break;
@@ -189,10 +185,10 @@ public class PCodeExtractorV2 extends BaseTool {
                     dumppedGraph.put("SOG", g);
                     SIGFunction sig = graphFactory.constructSIGFromSNG(cfgFunction.getAddress(), sngGraph);
                     g = graphFactory.dumpGraph(sig, verbose_level);
-                    dumppedGraph.put("SIG", g);
+                    dumppedGraph.put("ISCG", g);
                     STGFunction stg = graphFactory.constructSTGFromSNG(cfgFunction.getAddress(), sngGraph);
                     g = graphFactory.dumpGraph(stg, verbose_level);
-                    dumppedGraph.put("STG", g);
+                    dumppedGraph.put("TSCG", g);
                     break;
             }
             binOut.putOpt((String) oneCfgJson.get("start_ea"), dumppedGraph);
