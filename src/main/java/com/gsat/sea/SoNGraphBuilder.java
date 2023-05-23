@@ -339,7 +339,8 @@ public class SoNGraphBuilder {
         }
 
         public void revert() {
-            assert actions.pop().empty();
+            var top = actions.pop();
+            assert top.empty();
             var actionStack = actions.peek();
             while (!actionStack.empty()) {
                 var action = actionStack.pop();
