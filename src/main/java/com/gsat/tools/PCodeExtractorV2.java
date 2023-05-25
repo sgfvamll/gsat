@@ -53,6 +53,26 @@ public class PCodeExtractorV2 extends BaseTool {
     }
 
     @Override
+    Boolean preProcessOptions(CommandLine commandLine) {
+        if (commandLine.hasOption("program_load_mode")) {
+            programLoadMode = commandLine.getOptionValue("program_load_mode");
+        }
+        if (commandLine.hasOption("opt_level")) {
+            int opt = Integer.parseInt(commandLine.getOptionValue("opt_level"), 10);
+            if (opt == 1) {
+                preferRawPcode = false;
+                if (!programLoadMode.equals("ghidra")) 
+                    this.analysisMode = 3;
+            } else {
+                preferRawPcode = true;
+                if (!programLoadMode.equals("ghidra")) 
+                    this.analysisMode = 1;
+            }
+        }
+        return true;
+    }
+
+    @Override
     Boolean processOptions(CommandLine commandLine) {
         try {
             cfgFilePath = BaseTool.getRequiredString(commandLine, "cfg_file");
@@ -62,16 +82,6 @@ public class PCodeExtractorV2 extends BaseTool {
         }
         if (commandLine.hasOption("verbose_level"))
             verbose_level = Integer.parseInt(commandLine.getOptionValue("verbose_level"), 10);
-        if (commandLine.hasOption("opt_level")) {
-            int opt = Integer.parseInt(commandLine.getOptionValue("opt_level"), 10);
-            if (opt == 1) {
-                preferRawPcode = false;
-                this.analysisMode = 3;
-            } else {
-                preferRawPcode = true;
-                this.analysisMode = 1;
-            }
-        }
         if (commandLine.hasOption("extraction_mode")) {
             String mode = commandLine.getOptionValue("extraction_mode");
             if (mode.equals("debug_one")) {

@@ -19,6 +19,7 @@ public abstract class BaseTool {
     Program program; // The program for this tool to analyze.
     FlatProgramAPI flatApi;
 
+    String programLoadMode = "elf";
     String outputFile = null; // Output raw / human-readable results
 
     protected int analysisMode = 4;
@@ -30,6 +31,9 @@ public abstract class BaseTool {
     abstract Option[] getOptions();
 
     abstract Boolean processOptions(CommandLine commandLine);
+    Boolean preProcessOptions(CommandLine commandLine) {
+        return true;
+    }
 
     abstract public Boolean run();
 
@@ -97,7 +101,7 @@ public abstract class BaseTool {
         }
 
         String projectDir = null, projectName = null, programTobeAnalyzed = null;
-        String programLoadMode = null, programName = null;
+        String programName = null;
         String languageId = null, baseAddress = null;
         Boolean saveProject = false;
 
@@ -162,8 +166,8 @@ public abstract class BaseTool {
                     break;
             }
             // AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-            // if (!programLoadMode.equals("ghidra")) {
-            this.analyzeProgram(program);
+            if (!programLoadMode.equals("ghidra")) 
+                this.analyzeProgram(program);
             flatApi = new FlatProgramAPI(program);
         } catch (Exception e) {
             ColoredPrint.error("Failed to load project / program. ");

@@ -78,7 +78,8 @@ public class ToolFactory {
           String.format("gsat %s [options] target", args[0]), options, false);
         return null;
     }
-    if (!tool.processBasicOptions(commandLine) || 
+    if (!tool.preProcessOptions(commandLine) ||
+        !tool.processBasicOptions(commandLine) || 
         !tool.processOptions(commandLine)) {
         tool.close();
         formatter.printHelp(
