@@ -24,7 +24,7 @@ public class AddressInterval implements Comparable<AddressInterval> {
 
     public Varnode toVarnode() {
         return new Varnode(minAddress, (int) size);
-    } 
+    }
 
     AddressInterval(Address start, long length) {
         this.minAddress = start;
@@ -44,9 +44,7 @@ public class AddressInterval implements Comparable<AddressInterval> {
         assert n >= 0;
         if (n >= size)
             return null;
-        minAddress = minAddress.addWrap(n);
-        size -= n;
-        return this;
+        return new AddressInterval(minAddress.addWrap(n), size - n);
     }
 
     public AddressInterval[] substract(AddressInterval other) {

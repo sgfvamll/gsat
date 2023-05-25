@@ -183,6 +183,7 @@ public class SoNGraphBuilder {
 
         /// Return the old value associated with the key.
         public SoNNode put(AddressInterval requiredRange, SoNNode node) {
+            assert node != null;
             var sEntry = state.floorEntry(requiredRange);
             if (sEntry != null && sEntry.getKey().equals(requiredRange)) {
                 return eput(sEntry, node);
@@ -264,6 +265,7 @@ public class SoNGraphBuilder {
         }
 
         protected void putOnNewKey(AddressInterval interval, SoNNode node) {
+            assert node != null;
             assert !state.containsKey(interval);
             state.put(interval, node);
         }
@@ -313,6 +315,7 @@ public class SoNGraphBuilder {
         }
 
         protected void putOnNewKey(AddressInterval interval, SoNNode node) {
+            assert node != null;
             assert !keyHasOverlap(interval);
             recordLog(interval, null);
             state.computeIfAbsent(interval, (k) -> new Stack<>()).push(node);
@@ -517,7 +520,7 @@ public class SoNGraphBuilder {
             int blId = n.id();
             for (PcodeOp op : n.getPcodeOps()) {
                 if (op.getOpcode() != PcodeOp.MULTIEQUAL)
-                    break;
+                    continue;
                 SoNNode phi = SoNNode.newPhi(regions.get(blId), op, 0);
                 phi.addDefinedOp(op);
                 phiMap.put(op, phi);
@@ -635,7 +638,7 @@ public class SoNGraphBuilder {
             }
             for (PcodeOp op : succ.getPcodeOps()) {
                 if (op.getOpcode() != PcodeOp.MULTIEQUAL)
-                    break;
+                    continue;
                 if (inOrder >= op.getNumInputs())
                     continue;
                 Varnode in = op.getInput(inOrder);
