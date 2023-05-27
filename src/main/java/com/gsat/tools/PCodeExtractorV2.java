@@ -21,7 +21,7 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Program;
 
 public class PCodeExtractorV2 extends BaseTool {
-    String cfgFilePath;
+    String cfgFilePath = null;
     String outputFormat;
     int verbose_level = 0;
     int extraction_mode = 0;
@@ -75,10 +75,12 @@ public class PCodeExtractorV2 extends BaseTool {
     @Override
     Boolean processOptions(CommandLine commandLine) {
         try {
-            cfgFilePath = BaseTool.getRequiredString(commandLine, "cfg_file");
             outputFormat = BaseTool.getRequiredString(commandLine, "output_format");
         } catch (Exception e) {
             return false;
+        }
+        if (commandLine.hasOption("cfg_file")) {
+            cfgFilePath = commandLine.getOptionValue("cfg_file");
         }
         if (commandLine.hasOption("verbose_level"))
             verbose_level = Integer.parseInt(commandLine.getOptionValue("verbose_level"), 10);
@@ -136,12 +138,13 @@ public class PCodeExtractorV2 extends BaseTool {
         if (offset == null && cfgInfos.length() > 1) {
             offset = determineLoadingOffsetBySymbol((JSONObject) cfgInfos.get(1));
         }
-        if (offset == null) {
+        if (offset == null && !programLoadMode.equals("binary")) {
             //// Assume IDA always loads the PIE binary at 0 address and non-PIE binary at its defined entry. 
             ColoredPrint.warning("Determing offset by Function Symbol failed. ");
             offset = getLoadingOffsetFromOriginalBase();
         }
-        if (offset != 0) {
+        if (offset != null && offset != 0) {
+            ColoredPrint.info("Rebase program to %x. ", program.getImageBase().add(-offset).getOffset());
             AnalysisHelper.rebaseProgram(program, program.getImageBase().add(-offset));
         }
 

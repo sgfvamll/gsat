@@ -118,7 +118,7 @@ public class ProjectManager {
             program = AutoImporter.importByUsingBestGuess(programFile, null, this, messageLog, TaskMonitor.DUMMY);
         } else {
             Language language = DefaultLanguageService.getLanguageService().getLanguage(new LanguageID(languageId));
-            if (baseAddr == null || !baseAddr.equals("")) {
+            if (baseAddr == null || baseAddr.equals("")) {
                 baseAddr = "0x0";
             }
             List<Pair<String, String>> imageBaseOptions = Arrays.asList(

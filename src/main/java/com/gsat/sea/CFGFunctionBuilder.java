@@ -48,7 +48,7 @@ public class CFGFunctionBuilder {
         for (var bl : blocks.values())
             if (bl.getAddress().compareTo(fva) >= 0)
                 return bl;
-        return null;
+        return blocks.firstEntry().getValue();
     }
 
     public void append(CFGBlock bl) {
@@ -136,11 +136,16 @@ public class CFGFunctionBuilder {
         return new OpSite(targetBl, opIdx);
     }
 
-    private Address getAvailableBlockStart() {
+    private Address getAvailableBlockStart(long nskip) {
         Address addr = fva.getAddressSpace().getMaxAddress();
         SequenceNumber seqnum = new SequenceNumber(addr, 0);
-        while (blocks.containsKey(seqnum)) {
-            addr.subtract(1);
+        while (nskip >= 0) {
+            while (blocks.containsKey(seqnum)) {
+                addr = addr.subtract(1);
+                seqnum = new SequenceNumber(addr, 0);
+            }
+            nskip -= 1;
+            addr = addr.subtract(1);
             seqnum = new SequenceNumber(addr, 0);
         }
         return addr;
@@ -282,7 +287,7 @@ public class CFGFunctionBuilder {
         if (possibleEndBlocks.isEmpty()) {
             possibleEndBlocks.addAll(blocks.values());
         }
-        CFGBlock retbl = new CFGBlock(getAvailableBlockStart(), 0);
+        CFGBlock retbl = new CFGBlock(getAvailableBlockStart(0), 0);
         append(retbl);
         for (var bl : possibleEndBlocks) {
             bl.linkOut(retbl);
@@ -377,7 +382,7 @@ public class CFGFunctionBuilder {
                         PcodeOp.CALL, new Varnode[] { target }, null);
                 graphFactory.adaptOp(newCall, bl, function);
             } else if (opc == PcodeOp.CBRANCH) {
-                Address nextAddr = getAvailableBlockStart();
+                Address nextAddr = getAvailableBlockStart(newReturns.size());
                 CFGBlock retBl = new CFGBlock(nextAddr, 1);
                 bl.linkOut(retBl);
                 newReturns.add(retBl);

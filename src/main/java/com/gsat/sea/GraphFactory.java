@@ -354,7 +354,8 @@ public class GraphFactory {
             JSONArray edgeInfo = (JSONArray) edgeInfoObj;
             long from = edgeInfo.getLong(0), to = edgeInfo.getLong(1);
             CFGBlock fromBl = blockMap.get(from), toBl = blockMap.get(to);
-            fromBl.linkOut(toBl);
+            if (fromBl != null && toBl != null)
+                fromBl.linkOut(toBl);
         }
         builder.fixFlow();
         builder.resolveTailBranches(this);
