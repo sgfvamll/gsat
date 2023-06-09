@@ -546,12 +546,24 @@ public class SoNGraphBuilder {
                 worklist.pop();
             }
         }
+        // buildOne(bfsOrderTree, nodes.get(0));
         assert processed.size() == cfgFunction.getNumBlocks();
         // Ghidra Warning: Ignoring partial resolution of indirect
         // assert postEffectUse.isEmpty();
         postEffectUse.clear();
         return new SoNGraph(end);
     }
+
+    // private void buildOne(List<List<Integer>> bfsOrderTree, CFGBlock bl) {
+    //     buildOneBlock(bl);
+    //     processed.add(bl); // Mark as processed.
+    //     state.commit();
+    //     for (var childId : bfsOrderTree.get(bl.id())) {
+    //         buildOne(bfsOrderTree, nodes.get(childId));
+    //     }
+    //     /// backtrack
+    //     state.revert();
+    // }
 
     private void buildOneBlock(CFGBlock bl) {
         int blId = bl.id();
