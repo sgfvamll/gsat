@@ -5,7 +5,7 @@ import com.google.common.base.CaseFormat;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.pcode.PcodeOp;
 
-public class SoNOp {
+public class SOGOp {
 
     public static int numDataUseOfPcodeOp(PcodeOp op) {
         return op.getNumInputs() - dataUseStart(op.getOpcode());

@@ -8,12 +8,12 @@ import com.gsat.sea.analysis.DAGGraph;
 
 import ghidra.program.model.address.Address;
 
-public class SIGFunction implements DAGGraph<SIGNode> {
+public class ISCGFunction implements DAGGraph<ISCGNode> {
     Address fva;
     boolean rawPcode;
-    List<SIGNode> nodes;
+    List<ISCGNode> nodes;
 
-    SIGFunction(Address start, Collection<SIGNode> dfgNodes) {
+    ISCGFunction(Address start, Collection<ISCGNode> dfgNodes) {
         fva = start;
         nodes = new ArrayList<>();
         nodes.addAll(dfgNodes);
@@ -27,11 +27,11 @@ public class SIGFunction implements DAGGraph<SIGNode> {
         return rawPcode;
     }
 
-    public SIGNode root() {
+    public ISCGNode root() {
         return nodes.get(0);
     }
 
-    public Collection<SIGNode> workroots() {
+    public Collection<ISCGNode> workroots() {
         return nodes;
     }
 

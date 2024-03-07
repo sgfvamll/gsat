@@ -248,10 +248,10 @@ public class CFGFunctionBuilder {
             if (i < 0)
                 continue;
             PcodeOp lastNoBranch = oplist.get(i);
-            while (i > 0 && SoNOp.endsBlock(lastNoBranch.getOpcode())) {
+            while (i > 0 && SOGOp.endsBlock(lastNoBranch.getOpcode())) {
                 lastNoBranch = oplist.get(--i);
             }
-            if (SoNOp.isCall(lastNoBranch.getOpcode())) {
+            if (SOGOp.isCall(lastNoBranch.getOpcode())) {
                 possibleEndBlocks.add(entry.getValue());
             }
         }
@@ -277,7 +277,7 @@ public class CFGFunctionBuilder {
         if (possibleEndBlocks.isEmpty()) {
             for (var entry : blocks.entrySet()) {
                 for (PcodeOp op : entry.getValue().getPcodeOps())
-                    if (SoNOp.isCall(op.getOpcode())) {
+                    if (SOGOp.isCall(op.getOpcode())) {
                         possibleEndBlocks.add(entry.getValue());
                         break;
                     }

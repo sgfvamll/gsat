@@ -5,19 +5,19 @@ import java.util.ArrayList;
 
 import com.gsat.sea.analysis.DAGGraph;
 
-public class SoNGraph implements DAGGraph<SoNNode> {
-    SoNNode end;
+public class SOG implements DAGGraph<SOGNode> {
+    SOGNode end;
 
-    SoNGraph(SoNNode endNode) {
+    SOG(SOGNode endNode) {
         end = endNode;
     }
 
-    public SoNNode root() {
+    public SOGNode root() {
         return end;
     }
 
-    public Collection<SoNNode> workroots() {
-        var r = new ArrayList<SoNNode>();
+    public Collection<SOGNode> workroots() {
+        var r = new ArrayList<SOGNode>();
         r.add(end);
         return r;
     }

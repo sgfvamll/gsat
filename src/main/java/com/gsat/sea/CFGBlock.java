@@ -264,7 +264,7 @@ public class CFGBlock implements DAGNode<CFGBlock> {
             succ.cfgIns.add(newBl);
         }
         cfgOuts.clear();
-        if (SoNOp.hasFallThrough(getLastOp().getOpcode())) {
+        if (SOGOp.hasFallThrough(getLastOp().getOpcode())) {
             linkOut(newBl);
         }
         return newBl;

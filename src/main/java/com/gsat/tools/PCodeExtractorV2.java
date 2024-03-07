@@ -9,9 +9,9 @@ import org.json.*;
 import com.gsat.helper.AnalysisHelper;
 import com.gsat.sea.GraphFactory;
 import com.gsat.sea.CFGFunction;
-import com.gsat.sea.SIGFunction;
-import com.gsat.sea.STGFunction;
-import com.gsat.sea.SoNGraph;
+import com.gsat.sea.ISCGFunction;
+import com.gsat.sea.TSCGFunction;
+import com.gsat.sea.SOG;
 import com.gsat.utils.ColoredPrint;
 import com.gsat.utils.CommonUtils;
 
@@ -182,7 +182,7 @@ public class PCodeExtractorV2 extends BaseTool {
                     dumppedGraph = graphFactory.dumpGraph(cfgFunction, verbose_level);
                     break;
                 case "SOG":
-                    SoNGraph graph = graphFactory.constructSeaOfNodes(cfgFunction);
+                    SOG graph = graphFactory.constructSOG(cfgFunction);
                     dumppedGraph = graphFactory.dumpGraph(graph, verbose_level);
                     break;
                 case "ALL":
@@ -190,17 +190,17 @@ public class PCodeExtractorV2 extends BaseTool {
                     dumppedGraph.put("PcodeLevel", cfgFunction.pcodeLevel());
                     JSONObject g = graphFactory.dumpGraph(cfgFunction, verbose_level);
                     dumppedGraph.put("ACFG", g);
-                    long liftingSNGStart = System.nanoTime();
-                    SoNGraph sngGraph = graphFactory.constructSeaOfNodes(cfgFunction);
-                    long liftingSNGEnd = System.nanoTime();
-                    g = graphFactory.dumpGraph(sngGraph, verbose_level);
-                    g.put("LiftingCost_ns", liftingSNGEnd - liftingSNGStart);
+                    long liftingSOGStart = System.nanoTime();
+                    SOG sog = graphFactory.constructSOG(cfgFunction);
+                    long liftingSOGEnd = System.nanoTime();
+                    g = graphFactory.dumpGraph(sog, verbose_level);
+                    g.put("LiftingCost_ns", liftingSOGEnd - liftingSOGStart);
                     dumppedGraph.put("SOG", g);
-                    SIGFunction sig = graphFactory.constructSIGFromSNG(cfgFunction.getAddress(), sngGraph);
-                    g = graphFactory.dumpGraph(sig, verbose_level);
+                    ISCGFunction iscg = graphFactory.constructISCGFromSOG(cfgFunction.getAddress(), sog);
+                    g = graphFactory.dumpGraph(iscg, verbose_level);
                     dumppedGraph.put("ISCG", g);
-                    STGFunction stg = graphFactory.constructSTGFromSNG(cfgFunction.getAddress(), sngGraph);
-                    g = graphFactory.dumpGraph(stg, verbose_level);
+                    TSCGFunction tscg = graphFactory.constructTSCGFromSOG(cfgFunction.getAddress(), sog);
+                    g = graphFactory.dumpGraph(tscg, verbose_level);
                     dumppedGraph.put("TSCG", g);
                     break;
             }

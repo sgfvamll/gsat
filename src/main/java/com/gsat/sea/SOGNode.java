@@ -4,14 +4,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import com.gsat.sea.SoNOp.*;
+import com.gsat.sea.SOGOp.*;
 import com.gsat.sea.analysis.DAGNode;
 
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 
-public class SoNNode implements DAGNode<SoNNode> {
+public class SOGNode implements DAGNode<SOGNode> {
     static int idCnt = 0;
     static final int nUsesType = 4;
 
@@ -22,11 +22,11 @@ public class SoNNode implements DAGNode<SoNNode> {
     private int id;
     private int[] numUsesPerType; // 0-data, 1-control, 2-memory effect, 3-other effect
     private BaseOp op; // op is allowed to be shared by multiple nodes and should be immutable. 
-    List<SoNNode> uses;
+    List<SOGNode> uses;
     List<PcodeOp> definedOps; // Pcode ops that define this node. 
     Varnode definedNode = null;
 
-    public SoNNode(BaseOp operation, int initUses) {
+    public SOGNode(BaseOp operation, int initUses) {
         id = idCnt++;
         op = operation;
         uses = new ArrayList<>(initUses);
@@ -38,7 +38,7 @@ public class SoNNode implements DAGNode<SoNNode> {
         definedOps = new ArrayList<>();
     }
 
-    public SoNNode(SoNNode node) {
+    public SOGNode(SOGNode node) {
         this(node.op, node.uses.size());
         for (int i = 0; i < node.uses.size(); i++)
             uses.set(i, node.uses.get(i));
@@ -50,7 +50,7 @@ public class SoNNode implements DAGNode<SoNNode> {
         definedNode = node.definedNode;
     }
 
-    private SoNNode(int opc, int initUses) {
+    private SOGNode(int opc, int initUses) {
         // TODO share baseop objects
         this(new BaseOp(opc), initUses);
         assert opc != PcodeOp.MULTIEQUAL;
@@ -76,11 +76,11 @@ public class SoNNode implements DAGNode<SoNNode> {
         return id;
     }
 
-    public List<SoNNode> getPredecessors() {
+    public List<SOGNode> getPredecessors() {
         return null;
     }
 
-    public List<SoNNode> getSuccessors() {
+    public List<SOGNode> getSuccessors() {
         return getUses();
     }
 
@@ -112,26 +112,26 @@ public class SoNNode implements DAGNode<SoNNode> {
         return definedNode;
     }
 
-    public List<SoNNode> getUses() {
+    public List<SOGNode> getUses() {
         return uses;
     }
 
-    public List<SoNNode> getDataUses() {
+    public List<SOGNode> getDataUses() {
         return uses.subList(0, numUsesPerType[0]);
     }
 
-    void setUse(int idx, SoNNode inp) {
+    void setUse(int idx, SOGNode inp) {
         uses.set(idx, inp);
     }
 
-    void setPhiUse(int idx, SoNNode inp) {
+    void setPhiUse(int idx, SOGNode inp) {
         if (numDataUses() == 0) 
             // effect phi, skip the region input.  
             idx += 1;   
         uses.set(idx, inp);
     }
 
-    void addUse(int type, SoNNode inp) {
+    void addUse(int type, SOGNode inp) {
         assert type < nUsesType && type >= 0;
         int insertAt = 0;
         for (int i = 0; i <= type; i++)
@@ -148,86 +148,86 @@ public class SoNNode implements DAGNode<SoNNode> {
         return numUsesPerType[0];
     }
 
-    void addDataUse(SoNNode inp) {
+    void addDataUse(SOGNode inp) {
         addUse(0, inp);
     }
 
-    void addControlUse(SoNNode inp) {
+    void addControlUse(SOGNode inp) {
         addUse(1, inp);
     }
 
-    void addMemoryEffectUse(SoNNode inp) {
+    void addMemoryEffectUse(SOGNode inp) {
         addUse(2, inp);
     }
 
-    void addOtherEffectUse(SoNNode inp) {
+    void addOtherEffectUse(SOGNode inp) {
         addUse(3, inp);
     }
 
-    public static SoNNode newSoNNodeFromOp(PcodeOp op) {
+    public static SOGNode newSOGNodeFromOp(PcodeOp op) {
         int opc = op.getOpcode();
-        SoNNode result;
+        SOGNode result;
         switch (opc) {
             case PcodeOp.SUBPIECE:
                 result = newProject(op.getOutput().getSize());
                 break;
             case PcodeOp.INDIRECT:
-                result = new SoNNode(opc, 1);
+                result = new SOGNode(opc, 1);
                 break;
             default:
-                result = new SoNNode(opc, SoNOp.numDataUseOfPcodeOp(op));
+                result = new SOGNode(opc, SOGOp.numDataUseOfPcodeOp(op));
         }
         result.definedOps.add(op);
         result.definedNode = op.getOutput();
         return result;
     }
 
-    public static SoNNode newStoreOrConst(Varnode varnode) {
+    public static SOGNode newStoreOrConst(Varnode varnode) {
         return newStoreOrConst(varnode.getAddress().getAddressSpace(), varnode.getOffset(), varnode.getSize());
     }
 
-    public static SoNNode newStoreOrConst(AddressInterval interval) {
+    public static SOGNode newStoreOrConst(AddressInterval interval) {
         return newStoreOrConst(interval.getMinAddress().getAddressSpace(),
                 interval.getMinAddress().getOffset(), (int) interval.getLength());
     }
 
-    public static SoNNode newStoreOrConst(AddressSpace space, long offset, int size) {
-        SoNNode result;
+    public static SOGNode newStoreOrConst(AddressSpace space, long offset, int size) {
+        SOGNode result;
         if (space == GraphFactory.getStoreSpace()) {
-            result = SoNNode.newMemorySpace(offset); // represents the entire memory space 
+            result = SOGNode.newMemorySpace(offset); // represents the entire memory space 
         } else if (space.isConstantSpace()) {
-            result = SoNNode.newConstant(offset, size);
+            result = SOGNode.newConstant(offset, size);
         } else if (space.isRegisterSpace()) {
-            result = SoNNode.newRegisterStore(offset, size); // one register store
+            result = SOGNode.newRegisterStore(offset, size); // one register store
         } else if (space.isMemorySpace()) {
-            result = SoNNode.newMemoryStore(offset, size); // one memory store
+            result = SOGNode.newMemoryStore(offset, size); // one memory store
         } else if (space.isStackSpace()) {
-            result = SoNNode.newStackStore(offset, size); // one stack store
+            result = SOGNode.newStackStore(offset, size); // one stack store
         } else {
-            result = SoNNode.newOtherStore(space.getSpaceID(), offset, size);
+            result = SOGNode.newOtherStore(space.getSpaceID(), offset, size);
         }
         result.definedNode = new Varnode(space.getAddress(offset), size);
         return result;
     }
 
-    public static SoNNode newRegion(PcodeOp last) {
-        SoNNode controlNode = null;
+    public static SOGNode newRegion(PcodeOp last) {
+        SOGNode controlNode = null;
         if (last == null)
-            controlNode = SoNNode.newBrRegion(0);
+            controlNode = SOGNode.newBrRegion(0);
         else {
             int opc = last.getOpcode();
             switch (opc) {
                 case PcodeOp.CBRANCH:
-                    controlNode = SoNNode.newCBrRegion(1);
+                    controlNode = SOGNode.newCBrRegion(1);
                     break;
                 case PcodeOp.BRANCHIND:
-                    controlNode = SoNNode.newBrIndRegion(1);
+                    controlNode = SOGNode.newBrIndRegion(1);
                     break;
                 case PcodeOp.RETURN:
-                    controlNode = SoNNode.newReturnRegion(SoNOp.numDataUseOfPcodeOp(last));
+                    controlNode = SOGNode.newReturnRegion(SOGOp.numDataUseOfPcodeOp(last));
                     break;
                 default:
-                    controlNode = SoNNode.newBrRegion(0);
+                    controlNode = SOGNode.newBrRegion(0);
                     break;
             }
             controlNode.definedOps.add(last);
@@ -235,37 +235,37 @@ public class SoNNode implements DAGNode<SoNNode> {
         return controlNode;
     }
 
-    public static SoNNode newEnd() {
-        return new SoNNode(new End(), 0);
+    public static SOGNode newEnd() {
+        return new SOGNode(new End(), 0);
     }
 
-    public static SoNNode newBrRegion(int numUses) {
-        return new SoNNode(new BrRegion(), numUses);
+    public static SOGNode newBrRegion(int numUses) {
+        return new SOGNode(new BrRegion(), numUses);
     }
 
-    public static SoNNode newCBrRegion(int numUses) {
-        return new SoNNode(new CBrRegion(), numUses);
+    public static SOGNode newCBrRegion(int numUses) {
+        return new SOGNode(new CBrRegion(), numUses);
     }
 
-    public static SoNNode newBrIndRegion(int numUses) {
-        return new SoNNode(new BrIndRegion(), numUses);
+    public static SOGNode newBrIndRegion(int numUses) {
+        return new SOGNode(new BrIndRegion(), numUses);
     }
 
-    public static SoNNode newReturnRegion(int numUses) {
-        return new SoNNode(new ReturnRegion(), numUses);
+    public static SOGNode newReturnRegion(int numUses) {
+        return new SOGNode(new ReturnRegion(), numUses);
     }
 
-    public static SoNNode newPhi(SoNNode region, PcodeOp op, int type) {
-        SoNNode phi = newPhi(region, op.getOutput(), op.getNumInputs(), type);
+    public static SOGNode newPhi(SOGNode region, PcodeOp op, int type) {
+        SOGNode phi = newPhi(region, op.getOutput(), op.getNumInputs(), type);
         phi.definedOps.add(op);
         return phi;
     }
 
-    public static SoNNode newPhi(SoNNode region, Varnode defined, int numUses, int type) {
+    public static SOGNode newPhi(SOGNode region, Varnode defined, int numUses, int type) {
         assert defined != null && region != null;
         int numDataUses = type != 0 ? 0 : numUses;
         int numEffectUses = type != 0 ? numUses : 0;
-        SoNNode phi = new SoNNode(new Phi(), numDataUses);
+        SOGNode phi = new SOGNode(new Phi(), numDataUses);
         phi.addControlUse(region);
         for (int i = 0; i < numEffectUses; i++)
             phi.addUse(type, null);
@@ -273,59 +273,59 @@ public class SoNNode implements DAGNode<SoNNode> {
         return phi;
     }
 
-    public static SoNNode newProject(int outSize) {
+    public static SOGNode newProject(int outSize) {
         BaseOp op = new Project(outSize);
-        return new SoNNode(op, 2);
+        return new SOGNode(op, 2);
     }
 
-    public static SoNNode newProject(SoNNode input, int outSize, long offset, Varnode defined) {
-        SoNNode project = SoNNode.newProject(outSize);
+    public static SOGNode newProject(SOGNode input, int outSize, long offset, Varnode defined) {
+        SOGNode project = SOGNode.newProject(outSize);
         project.setUse(0, input);
-        project.setUse(1, SoNNode.newConstant(offset, 8));
+        project.setUse(1, SOGNode.newConstant(offset, 8));
         project.definedNode = defined;
         return project;
     }
 
-    public static SoNNode newControlProject(SoNNode input, long offset) {
-        SoNNode project = new SoNNode(new Project(0), 0);
+    public static SOGNode newControlProject(SOGNode input, long offset) {
+        SOGNode project = new SOGNode(new Project(0), 0);
         project.addControlUse(input);
-        project.addControlUse(SoNNode.newConstant(offset, 8));
+        project.addControlUse(SOGNode.newConstant(offset, 8));
         return project;
     }
 
-    public static SoNNode newPiece(int numDataUses, Varnode defined) {
-        SoNNode r = new SoNNode(PcodeOp.PIECE, numDataUses);
+    public static SOGNode newPiece(int numDataUses, Varnode defined) {
+        SOGNode r = new SOGNode(PcodeOp.PIECE, numDataUses);
         r.definedNode = defined;
         return r;
     }
 
-    public static SoNNode newMemorySpace(long spaceId) {
+    public static SOGNode newMemorySpace(long spaceId) {
         BaseOp op = new MemorySpace(spaceId);
-        return new SoNNode(op, 0);
+        return new SOGNode(op, 0);
     }
 
-    public static SoNNode newConstant(long c, int size) {
+    public static SOGNode newConstant(long c, int size) {
         BaseOp op = new ConstantLong(c, size);
-        return new SoNNode(op, 0);
+        return new SOGNode(op, 0);
     }
 
-    public static SoNNode newRegisterStore(long c, int size) {
+    public static SOGNode newRegisterStore(long c, int size) {
         BaseOp op = new RegisterStore(c, size);
-        return new SoNNode(op, 0);
+        return new SOGNode(op, 0);
     }
 
-    public static SoNNode newMemoryStore(long c, int size) {
+    public static SOGNode newMemoryStore(long c, int size) {
         BaseOp op = new MemoryStore(c, size);
-        return new SoNNode(op, 0);
+        return new SOGNode(op, 0);
     }
 
-    public static SoNNode newStackStore(long c, int size) {
+    public static SOGNode newStackStore(long c, int size) {
         BaseOp op = new StackStore(c, size);
-        return new SoNNode(op, 0);
+        return new SOGNode(op, 0);
     }
 
-    public static SoNNode newOtherStore(long spaceId, long c, int size) {
+    public static SOGNode newOtherStore(long spaceId, long c, int size) {
         BaseOp op = new OtherStore(spaceId, c, size);
-        return new SoNNode(op, 0);
+        return new SOGNode(op, 0);
     }
 }

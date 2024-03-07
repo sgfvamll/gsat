@@ -8,32 +8,32 @@ import com.gsat.sea.analysis.DAGNode;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
 
-public class STGNode implements DAGNode<STGNode> {
+public class TSCGNode implements DAGNode<TSCGNode> {
     static int gid;
     int _id;
     PcodeOp op;
     Varnode varnode;
-    List<STGNode> uses;
+    List<TSCGNode> uses;
     private int[] numUsesPerType; // 0-data, 1-control, 2-memory effect, 3-other effect
 
     static void clearIdCount() {
         gid = 0;
     }
 
-    STGNode(PcodeOp op, Varnode varnode) {
+    TSCGNode(PcodeOp op, Varnode varnode) {
         this._id = gid++;
         this.op = op;
         this.varnode = varnode;
         uses = new ArrayList<>();
-        numUsesPerType = new int[SoNNode.nUsesType];
+        numUsesPerType = new int[SOGNode.nUsesType];
         Arrays.fill(numUsesPerType, 0);
     }
 
-    STGNode(PcodeOp op) {
+    TSCGNode(PcodeOp op) {
         this(op, null);
     }
 
-    STGNode(Varnode varnode) {
+    TSCGNode(Varnode varnode) {
         this(null, varnode);
     }
 
@@ -45,8 +45,8 @@ public class STGNode implements DAGNode<STGNode> {
         return _id;
     }
 
-    void addUse(int type, STGNode inp) {
-        assert type < SoNNode.nUsesType && type >= 0;
+    void addUse(int type, TSCGNode inp) {
+        assert type < SOGNode.nUsesType && type >= 0;
         int insertAt = 0;
         for (int i = 0; i <= type; i++)
             insertAt += numUsesPerType[i];
@@ -70,11 +70,11 @@ public class STGNode implements DAGNode<STGNode> {
         return 0;
     }
 
-    public List<STGNode> getPredecessors() {
+    public List<TSCGNode> getPredecessors() {
         return null;
     }
 
-    public List<STGNode> getSuccessors() {
+    public List<TSCGNode> getSuccessors() {
         return uses;
     }
 }

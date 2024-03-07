@@ -15,9 +15,9 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.gsat.helper.AnalysisHelper;
-import com.gsat.sea.SoNOp.ConstantLong;
-import com.gsat.sea.SoNOp.MemorySpace;
-import com.gsat.sea.SoNOp.Store;
+import com.gsat.sea.SOGOp.ConstantLong;
+import com.gsat.sea.SOGOp.MemorySpace;
+import com.gsat.sea.SOGOp.Store;
 import com.gsat.sea.analysis.DAGGraph;
 import com.gsat.sea.analysis.DAGNode;
 import com.gsat.utils.ColoredPrint;
@@ -362,13 +362,13 @@ public class GraphFactory {
         return builder.finalizeFuncion(0, null);
     }
 
-    public SoNGraph constructSeaOfNodes(CFGFunction cfgFunction) {
-        SoNNode.clearIdCount();
-        SoNGraphBuilder builder = new SoNGraphBuilder(cfgFunction, this);
+    public SOG constructSOG(CFGFunction cfgFunction) {
+        SOGNode.clearIdCount();
+        SOGBuilder builder = new SOGBuilder(cfgFunction, this);
         return builder.build();
     }
 
-    private Varnode getDefinedVarnode(SoNNode soNNode) {
+    private Varnode getDefinedVarnode(SOGNode soNNode) {
         Varnode definedNode = soNNode.definedNode;
         if (definedNode != null)
             return definedNode;
@@ -389,7 +389,7 @@ public class GraphFactory {
     }
 
     /// TODO Fix definedNode for some cases. 
-    private PcodeOp generatPcodeOpFromSoNNode(SoNNode soNNode) {
+    private PcodeOp generatPcodeOpFromSOGNode(SOGNode soNNode) {
         int opc = soNNode.opcode();
         if (opc <= 0 || opc >= PcodeOp.PCODE_MAX)
             return null;
@@ -402,24 +402,24 @@ public class GraphFactory {
         return new PcodeOp(null, opc, inputs.toArray(new Varnode[0]), definedNode);
     }
 
-    public SIGFunction constructSIGFromSNG(Address fva, SoNGraph sng) {
-        Stack<SoNNode> worklist = new Stack<>();
-        Map<PcodeOp, SIGNode> nodes = new IdentityHashMap<>();
-        Set<SoNNode> nodeSet = new HashSet<>();
-        worklist.addAll(sng.workroots());
+    public ISCGFunction constructISCGFromSOG(Address fva, SOG sog) {
+        Stack<SOGNode> worklist = new Stack<>();
+        Map<PcodeOp, ISCGNode> nodes = new IdentityHashMap<>();
+        Set<SOGNode> nodeSet = new HashSet<>();
+        worklist.addAll(sog.workroots());
         nodeSet.addAll(worklist);
         while (!worklist.isEmpty()) {
-            SoNNode soNNode = worklist.pop();
+            SOGNode soNNode = worklist.pop();
             List<PcodeOp> definedOps = soNNode.getDefinedOps();
             if (definedOps.size() == 0) {
-                var created = generatPcodeOpFromSoNNode(soNNode);
+                var created = generatPcodeOpFromSOGNode(soNNode);
                 // Non-pcodeop node or not null
                 assert soNNode.opcode() <= -1 || created != null;
                 if (created != null)
                     definedOps.add(created);
             }
             for (var defined : definedOps) {
-                nodes.computeIfAbsent(defined, k -> new SIGNode(k));
+                nodes.computeIfAbsent(defined, k -> new ISCGNode(k));
             }
             for (var use : soNNode.getUses()) {
                 if (nodeSet.contains(use))
@@ -428,10 +428,10 @@ public class GraphFactory {
                 worklist.push(use);
             }
         }
-        worklist.addAll(sng.workroots());
+        worklist.addAll(sog.workroots());
         nodeSet.clear();
         while (!worklist.isEmpty()) {
-            SoNNode soNNode = worklist.pop();
+            SOGNode soNNode = worklist.pop();
             for (var defined : soNNode.getDefinedOps()) {
                 var dnode = nodes.get(defined);
                 var uses = soNNode.getUses();
@@ -448,31 +448,31 @@ public class GraphFactory {
                 worklist.push(use);
             }
         }
-        return new SIGFunction(fva, nodes.values());
+        return new ISCGFunction(fva, nodes.values());
     }
 
-    public STGFunction constructSTGFromSNG(Address fva, SoNGraph sng) {
-        Stack<SoNNode> worklist = new Stack<>();
-        Map<PcodeOp, STGNode> opnodes = new IdentityHashMap<>();
-        Map<Varnode, STGNode> varnodes = new IdentityHashMap<>();
-        Set<SoNNode> nodeSet = new HashSet<>();
-        worklist.addAll(sng.workroots());
+    public TSCGFunction constructTSCGFromSOG(Address fva, SOG sog) {
+        Stack<SOGNode> worklist = new Stack<>();
+        Map<PcodeOp, TSCGNode> opnodes = new IdentityHashMap<>();
+        Map<Varnode, TSCGNode> varnodes = new IdentityHashMap<>();
+        Set<SOGNode> nodeSet = new HashSet<>();
+        worklist.addAll(sog.workroots());
         nodeSet.addAll(worklist);
         while (!worklist.isEmpty()) {
-            SoNNode soNNode = worklist.pop();
+            SOGNode soNNode = worklist.pop();
             List<PcodeOp> definedOps = soNNode.getDefinedOps();
             if (definedOps.size() == 0) {
-                var created = generatPcodeOpFromSoNNode(soNNode);
+                var created = generatPcodeOpFromSOGNode(soNNode);
                 // Non-pcodeop node or not null
                 assert soNNode.opcode() <= -1 || created != null;
                 if (created != null)
                     definedOps.add(created);
             }
-            STGNode varnode = null;
+            TSCGNode varnode = null;
             if (soNNode.definedNode != null)
-                varnode = varnodes.computeIfAbsent(soNNode.definedNode, k -> new STGNode(k));
+                varnode = varnodes.computeIfAbsent(soNNode.definedNode, k -> new TSCGNode(k));
             for (var defined : definedOps) {
-                STGNode opnode = opnodes.computeIfAbsent(defined, k -> new STGNode(k));
+                TSCGNode opnode = opnodes.computeIfAbsent(defined, k -> new TSCGNode(k));
                 if (varnode != null)
                     varnode.addUse(0, opnode);
             }
@@ -483,16 +483,16 @@ public class GraphFactory {
                 worklist.push(use);
             }
         }
-        worklist.addAll(sng.workroots());
+        worklist.addAll(sog.workroots());
         nodeSet.clear();
         while (!worklist.isEmpty()) {
-            SoNNode soNNode = worklist.pop();
+            SOGNode soNNode = worklist.pop();
             for (var defined : soNNode.getDefinedOps()) {
                 var dnode = opnodes.get(defined);
                 var uses = soNNode.getUses();
                 for (int i = 0; i < uses.size(); i++) {
                     int ty = soNNode.getEdgeType(i) - 1;
-                    SoNNode use = uses.get(i);
+                    SOGNode use = uses.get(i);
                     if (ty != 0)
                         for (var useOp : use.getDefinedOps()) 
                             dnode.addUse(ty, opnodes.get(useOp));
@@ -509,17 +509,17 @@ public class GraphFactory {
                 worklist.push(use);
             }
         }
-        ArrayList<STGNode> nodes = new ArrayList<>();
+        ArrayList<TSCGNode> nodes = new ArrayList<>();
         nodes.addAll(opnodes.values());
         nodes.addAll(varnodes.values());
-        return new STGFunction(fva, nodes);
+        return new TSCGFunction(fva, nodes);
     }
 
-    public SIGFunction constructSIG(CFGFunction cfgFunction) {
-        SIGNode.clearIdCount();
-        SoNGraphBuilder builder = new SoNGraphBuilder(cfgFunction, this);
-        SoNGraph sng = builder.build();
-        return constructSIGFromSNG(cfgFunction.getAddress(), sng);
+    public ISCGFunction constructISCG(CFGFunction cfgFunction) {
+        ISCGNode.clearIdCount();
+        SOGBuilder builder = new SOGBuilder(cfgFunction, this);
+        SOG sog = builder.build();
+        return constructISCGFromSOG(cfgFunction.getAddress(), sog);
     }
 
     public <T extends DAGNode<T>> JSONObject dumpGraph(DAGGraph<T> graph, int verb_level) {
@@ -705,7 +705,7 @@ public class GraphFactory {
             // if (opc == PcodeOp.STORE)
             //     op.setOutput(store);
             bl.append(op);
-        } else if (SoNOp.isCall(opc)) {
+        } else if (SOGOp.isCall(opc)) {
             adaptCall(op, bl);
         } else if (opc == PcodeOp.RETURN) {
             adaptReturn(op, bl, function);

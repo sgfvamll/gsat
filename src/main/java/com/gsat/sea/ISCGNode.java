@@ -7,22 +7,22 @@ import java.util.Arrays;
 import com.gsat.sea.analysis.DAGNode;
 import ghidra.program.model.pcode.PcodeOp;
 
-public class SIGNode implements DAGNode<SIGNode>  {
+public class ISCGNode implements DAGNode<ISCGNode>  {
     static int gid;
     int _id;
     PcodeOp op;
-    List<SIGNode> uses;
+    List<ISCGNode> uses;
     private int[] numUsesPerType; // 0-data, 1-control, 2-memory effect, 3-other effect
 
     static void clearIdCount() {
         gid = 0;
     }
 
-    SIGNode(PcodeOp op) {
+    ISCGNode(PcodeOp op) {
         this._id = gid++;
         this.op = op;
         uses = new ArrayList<>();
-        numUsesPerType = new int[SoNNode.nUsesType];
+        numUsesPerType = new int[SOGNode.nUsesType];
         Arrays.fill(numUsesPerType, 0);
     }
 
@@ -34,8 +34,8 @@ public class SIGNode implements DAGNode<SIGNode>  {
         return _id;
     }
 
-    void addUse(int type, SIGNode inp) {
-        assert type < SoNNode.nUsesType && type >= 0;
+    void addUse(int type, ISCGNode inp) {
+        assert type < SOGNode.nUsesType && type >= 0;
         int insertAt = 0;
         for (int i = 0; i <= type; i++)
             insertAt += numUsesPerType[i];
@@ -59,11 +59,11 @@ public class SIGNode implements DAGNode<SIGNode>  {
         return 0;
     }
 
-    public List<SIGNode> getPredecessors() {
+    public List<ISCGNode> getPredecessors() {
         return null;
     }
 
-    public List<SIGNode> getSuccessors() {
+    public List<ISCGNode> getSuccessors() {
         return uses;
     }
 }

@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# A script to visualize SOG. 
+
 import sys
 import json
 import matplotlib.pyplot as plt
@@ -103,14 +108,6 @@ def _kamada_kawai_costfn(pos_vec, np, invdist, meanweight, dim, mask):
 def create_graph(nodes, edges):
     """
     Create a NetworkX direct graph from the list of nodes and edges.
-
-    Args:
-        node_list: list of nodes
-        edge_list: list of edges
-
-    Return
-        np.matrix: Numpy adjacency matrix
-        list: nodes in the graph
     """
     G = nx.MultiDiGraph()
     for node in nodes:
