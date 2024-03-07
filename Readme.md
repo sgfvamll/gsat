@@ -54,3 +54,11 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
 ```
+
+
+## Acknowledgement
+
+Collaborate with 
+- [Zino](https://github.com/zino00) on the development with *find-base* tool. 
+- [Taylau](https://github.com/F01ivor4) on the development with *unstrip* tool.
+- [learjet](https://github.com/learjet5) on the development with *taint-analysis* tool. 
