@@ -1,5 +1,7 @@
 package com.gsat.tools;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 
 import org.apache.commons.cli.CommandLine;
@@ -39,6 +41,7 @@ public class PCodeExtractorV2 extends BaseTool {
     int extraction_mode = 0;
     boolean preferRawPcode = true;
     String debugged_func;
+    String[] filters = null;
 
     public PCodeExtractorV2() {
         if (preferRawPcode)
@@ -61,6 +64,7 @@ public class PCodeExtractorV2 extends BaseTool {
                         "Path to a json file that contains all selected functions along with its CFG (i.e. *_cfg_disasm.json). "),
                 new Option("of", "output_format", true, "One of {'ACFG', 'SOG', 'ALL'}"),
                 new Option("v", "verbose_level", true, "`0` for mnems only and `1` for full. "),
+                new Option(null, "filter", true, "filter functions by keywords (splitted by ','). "),
         };
     }
 
@@ -73,13 +77,16 @@ public class PCodeExtractorV2 extends BaseTool {
             int opt = Integer.parseInt(commandLine.getOptionValue("opt_level"), 10);
             if (opt == 1) {
                 preferRawPcode = false;
-                if (!programLoadMode.equals("ghidra")) 
+                if (!programLoadMode.equals("ghidra"))
                     this.analysisMode = 3;
             } else {
                 preferRawPcode = true;
-                if (!programLoadMode.equals("ghidra")) 
+                if (!programLoadMode.equals("ghidra"))
                     this.analysisMode = 1;
             }
+        }
+        if (commandLine.hasOption("filter")) {
+            filters = commandLine.getOptionValue("filter").split(",");
         }
         return true;
     }
@@ -136,14 +143,109 @@ public class PCodeExtractorV2 extends BaseTool {
         }
     }
 
+    public JSONObject generateCFGJson() {
+        JSONObject result = new JSONObject();
+        JSONArray functionsArray = new JSONArray();
+
+        BasicBlockModel bbModel = new BasicBlockModel(program);
+        Listing listing = program.getListing();
+        FunctionIterator funcIter = listing.getFunctions(true);
+
+        while (funcIter.hasNext()) {
+            Function function = funcIter.next();
+            JSONObject functionObj = new JSONObject();
+            String fname = function.getName();
+
+            Boolean skip = filters != null;
+            for (String key : filters) {
+                if (fname.indexOf(key) != -1) {
+                    skip = false;
+                    break;
+                }
+            }
+            if (skip) {
+                continue;
+            }
+
+            functionObj.put("start_ea", "0x" + Long.toHexString(function.getEntryPoint().getOffset()));
+            functionObj.put("func_name", fname);
+
+            // Get basic blocks
+            JSONArray nodesArray = new JSONArray();
+            CodeBlockIterator bbIter;
+            try {
+                bbIter = bbModel.getCodeBlocksContaining(function.getBody(), TaskMonitor.DUMMY);
+                while (bbIter.hasNext()) {
+                    CodeBlock bb = bbIter.next();
+                    JSONArray nodeInfo = new JSONArray();
+                    nodeInfo.put("0x" + Long.toHexString(bb.getMinAddress().getOffset()));
+                    nodeInfo.put(bb.getNumAddresses());
+                    nodesArray.put(nodeInfo);
+                }
+            } catch (CancelledException e) {
+                e.printStackTrace();
+            }
+            functionObj.put("nodes", nodesArray);
+
+            // Get control flow edges
+            JSONArray edgesArray = new JSONArray();
+            try {
+                bbIter = bbModel.getCodeBlocksContaining(function.getBody(), TaskMonitor.DUMMY);
+                while (bbIter.hasNext()) {
+                    CodeBlock bb = bbIter.next();
+                    CodeBlockReferenceIterator destIter = bb.getDestinations(TaskMonitor.DUMMY);
+                    while (destIter.hasNext()) {
+                        CodeBlockReference dest = destIter.next();
+                        JSONArray edgeInfo = new JSONArray();
+                        edgeInfo.put(bb.getMinAddress().getOffset());
+                        edgeInfo.put(dest.getDestinationAddress().getOffset());
+                        edgesArray.put(edgeInfo);
+                    }
+                }
+            } catch (CancelledException e) {
+                e.printStackTrace();
+            }
+            functionObj.put("edges", edgesArray);
+
+            functionsArray.put(functionObj);
+        }
+        result.put(program.getName(), functionsArray);
+        return result;
+    }
+
     @Override
     public Boolean run() {
         if (analysisMode != 0)
             AnalysisHelper.doDecompilerParameterIDAnalysis(program);
 
+        if (cfgFilePath == null || !CommonUtils.fileExists(cfgFilePath)) {
+            if (cfgFilePath == null) {
+                try {
+                    cfgFilePath = Files.createTempFile(null, null).toString();
+                } catch (IOException e) {
+                    ColoredPrint.error("Unable to create cfg file. ");
+                    e.printStackTrace();
+                    return false;
+                }
+            }
+            JSONObject result = generateCFGJson();
+            CommonUtils.writeJson(result, cfgFilePath);
+        }
+
         JSONObject cfgJson = new JSONObject(CommonUtils.readFile(cfgFilePath));
         String idb_path = cfgJson.keys().next();
         JSONArray cfgInfos = cfgJson.getJSONArray(idb_path);
+
+        if (cfgInfos.length() == 0) {
+            ColoredPrint.warning("No functions to lift. ");
+            if (outputFile != null) {
+                JSONObject binOutWrap = new JSONObject();
+                binOutWrap.put(idb_path, cfgInfos);
+                CommonUtils.writeJson(binOutWrap, outputFile);
+                ColoredPrint.info("[*] Results saved at %s", outputFile);
+            }
+            return true;
+        }
 
         /// Step 1. Determine the offset (between the base address in IDA and Ghidra) and rebase. 
         Long offset = determineLoadingOffsetBySymbol((JSONObject) cfgInfos.get(0));

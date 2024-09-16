@@ -8,6 +8,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Writer;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -27,6 +28,16 @@ public class CommonUtils {
         uuid = uuid.replace("-", "");
 
         return uuid;
+    }
+
+    public static boolean fileExists(String json_fp) {
+        File file = new File(json_fp);
+        try {
+            return Files.exists(Paths.get(file.toURI()), LinkOption.NOFOLLOW_LINKS);
+        } catch (SecurityException e) {
+            e.printStackTrace();
+        }
+        return false;
     }
 
     public static String readFile(String json_fp) {
