@@ -54,18 +54,18 @@ public class AnalysisHelper {
     }
 
     public static void enableAutoAnalysisManger(Program program) {
-        AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+        // AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
 
         /// Print all analysis for debug
-        List<Analyzer> analyzers = ClassSearcher.getInstances(Analyzer.class);
-        String all_analyzers = "";
-        for (var analyzer : analyzers) {
-            Boolean isAvaiable = mgr.getAnalyzer(analyzer.getName()) != null;
-            if (isAvaiable) {
-                all_analyzers += "- " + analyzer.getName() + ", " + analyzer.getDescription() + ", \n";
-            }
-        }
-        ColoredPrint.info("Enabled Analysis: \n%s", all_analyzers);
+        // List<Analyzer> analyzers = ClassSearcher.getInstances(Analyzer.class);
+        // String all_analyzers = "";
+        // for (var analyzer : analyzers) {
+        //     Boolean isAvaiable = mgr.getAnalyzer(analyzer.getName()) != null;
+        //     if (isAvaiable) {
+        //         all_analyzers += "- " + analyzer.getName() + ", " + analyzer.getDescription() + ", \n";
+        //     }
+        // }
+        // ColoredPrint.info("Enabled Analysis: \n%s", all_analyzers);
 
         int txId = program.startTransaction("OptionChanged-dwarf");
         Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
