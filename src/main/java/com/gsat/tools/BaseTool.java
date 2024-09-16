@@ -17,6 +17,7 @@ public abstract class BaseTool {
 
     ProjectManager manager;
     Program program; // The program for this tool to analyze.
+    String programName;
     FlatProgramAPI flatApi;
 
     String programLoadMode = "elf";
@@ -101,7 +102,6 @@ public abstract class BaseTool {
         }
 
         String projectDir = null, projectName = null, programTobeAnalyzed = null;
-        String programName = null;
         String languageId = null, baseAddress = null;
         Boolean saveProject = false;
 

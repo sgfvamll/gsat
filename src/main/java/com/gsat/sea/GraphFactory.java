@@ -1,8 +1,6 @@
 package com.gsat.sea;
 
-import java.io.Console;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -27,6 +25,7 @@ import ghidra.app.cmd.function.CreateFunctionCmd;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.decompiler.DecompileResults;
+import ghidra.app.decompiler.DecompiledFunction;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressFactory;
 import ghidra.program.model.address.AddressSet;
@@ -785,7 +784,7 @@ public class GraphFactory {
         return hfunc;
     }
 
-    private HighFunction checkedGetHFuncAt(Address startEa, DecompInterface decompInterface) {
+    public HighFunction checkedGetHFuncAt(Address startEa, DecompInterface decompInterface) {
         Function func = program.getFunctionManager().getFunctionAt(startEa);
         int trys = 0;
 
@@ -831,6 +830,54 @@ public class GraphFactory {
             return null;
         }
         return hfunc;
+    }
+
+    public String checkedGetCCodeAt(Address startEa, DecompInterface decompInterface) {
+        Function func = program.getFunctionManager().getFunctionAt(startEa);
+        int trys = 0;
+
+        /// Check failed (1): Try disasmbling and re-create the function.
+        while (func == null) {
+            /// Create function if not valid.
+            int txId = program.startTransaction("CreateFunction");
+            AddressSetView toBeDecompiled = program.getAddressFactory()
+                    .getAddressSet(startEa, startEa.addWrap(1));
+            DisassembleCommand cmd = new DisassembleCommand(toBeDecompiled, null,
+                    true);
+            cmd.applyTo(program, TaskMonitor.DUMMY);
+            cmd.getDisassembledAddressSet();
+            CreateFunctionCmd fcmd = new CreateFunctionCmd(null, startEa, null, SourceType.DEFAULT, false, true);
+            fcmd.applyTo(program, TaskMonitor.DUMMY);
+            func = program.getListing().getFunctionAt(startEa);
+            program.endTransaction(txId, true);
+            if (func != null)
+                break;
+            trys += 1;
+            startEa = startEa.addWrap(1);
+            if (trys > 4)
+                break;
+        }
+
+        if (func == null) {
+            ColoredPrint.error(
+                    "Create function failed (start: %x) ", startEa.getOffset());
+            return null;
+        }
+
+        /// Decompile first, decompling may fix some previous wrong analysis.
+        int decompilingTimeSecs = 600;
+        DecompileResults dresult = decompInterface
+                .decompileFunction(func, decompilingTimeSecs, TaskMonitor.DUMMY);
+        DecompiledFunction decompiled = dresult.getDecompiledFunction();
+
+        if (decompiled == null) {
+            ColoredPrint.error(
+                    "Decompile function failed! Function (start: %x, body: %s)",
+                    startEa.getOffset(), func.getBody());
+            ColoredPrint.error(dresult.getErrorMessage());
+            return null;
+        }
+        return decompiled.getC();
     }
 
 }

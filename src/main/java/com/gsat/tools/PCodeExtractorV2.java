@@ -15,10 +15,22 @@ import com.gsat.sea.SOG;
 import com.gsat.utils.ColoredPrint;
 import com.gsat.utils.CommonUtils;
 
+import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.util.opinion.ElfLoader;
 import ghidra.framework.options.Options;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.block.BasicBlockModel;
+import ghidra.program.model.block.CodeBlock;
+import ghidra.program.model.block.CodeBlockIterator;
+import ghidra.program.model.block.CodeBlockReference;
+import ghidra.program.model.block.CodeBlockReferenceIterator;
+import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.FunctionIterator;
+import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
+import ghidra.util.exception.CancelledException;
+import ghidra.util.task.TaskMonitor;
 
 public class PCodeExtractorV2 extends BaseTool {
     String cfgFilePath = null;
@@ -164,6 +176,24 @@ public class PCodeExtractorV2 extends BaseTool {
         ArrayList<String> errorFuncs = new ArrayList<>();
         GraphFactory graphFactory = new GraphFactory(program);
         JSONObject binOut = new JSONObject();
+        DecompInterface decompInterface = null;
+        if (outputFormat.equals("ALL")) {
+            decompInterface = new DecompInterface();
+    
+            DecompileOptions options;
+            options = new DecompileOptions();
+    
+            long suggestedMaxInsts = options.getMaxInstructions(); // 100000
+            options.setMaxInstructions(Integer.MAX_VALUE);
+            ColoredPrint.info("Changing max_instructions from 0x%x to 0x%x. ", suggestedMaxInsts, Integer.MAX_VALUE);
+    
+            decompInterface.setOptions(options);
+    
+            decompInterface.toggleCCode(true);
+            if (!decompInterface.openProgram(program)) {
+                System.out.printf("Decompiler error: %s\n", decompInterface.getLastMessage());
+            }
+        }
         for (var oneCfgInfo : cfgInfos) {
             graphFactory.clearState();
             JSONObject oneCfgJson = (JSONObject) oneCfgInfo;
@@ -202,6 +232,13 @@ public class PCodeExtractorV2 extends BaseTool {
                     TSCGFunction tscg = graphFactory.constructTSCGFromSOG(cfgFunction.getAddress(), sog);
                     g = graphFactory.dumpGraph(tscg, verbose_level);
                     dumppedGraph.put("TSCG", g);
+                    if (decompInterface != null) {
+                        Address startEa = program.getAddressFactory().getAddress(oneCfgJson.getString("start_ea"));
+                        String decompiled = graphFactory.checkedGetCCodeAt(startEa, decompInterface);
+                        if (decompiled != null) {
+                            dumppedGraph.put("DECOMPILED_C", decompiled);
+                        }
+                    }
                     break;
             }
             binOut.putOpt((String) oneCfgJson.get("start_ea"), dumppedGraph);
