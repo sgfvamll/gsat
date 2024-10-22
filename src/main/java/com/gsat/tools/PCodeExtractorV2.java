@@ -157,10 +157,12 @@ public class PCodeExtractorV2 extends BaseTool {
             String fname = function.getName();
 
             Boolean skip = filters != null;
-            for (String key : filters) {
-                if (fname.indexOf(key) != -1) {
-                    skip = false;
-                    break;
+            if (filters != null) {
+                for (String key : filters) {
+                    if (fname.indexOf(key) != -1) {
+                        skip = false;
+                        break;
+                    }
                 }
             }
             if (skip) {
