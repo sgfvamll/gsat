@@ -215,6 +215,34 @@ public class PCodeExtractorV2 extends BaseTool {
         return result;
     }
 
+    private static String hexStringAdd(String value, long offset) {
+        if (value.startsWith("0x") || value.startsWith("0X"))
+            value = value.substring(2);
+        return "0x" + Long.toHexString(Long.parseLong(value, 16) + offset);
+    }
+
+    private void rebaseCfgInfos(JSONArray cfgInfos, long offset) {
+        for (var oneCfgInfo : cfgInfos) {
+            JSONObject oneCfgJson = (JSONObject) oneCfgInfo;
+
+            String key = "start_ea";
+            String value = PCodeExtractorV2.hexStringAdd(oneCfgJson.getString(key), offset);
+            oneCfgJson.put(key, value);
+
+            for (var node : oneCfgJson.getJSONArray("nodes")) {
+                JSONArray nodeTuple = (JSONArray) node;
+                String temp = PCodeExtractorV2.hexStringAdd(nodeTuple.getString(0), offset);
+                nodeTuple.put(0, temp);
+            }
+
+            for (var edge : oneCfgJson.getJSONArray("edges")) {
+                JSONArray edgeTuple = (JSONArray) edge;
+                edgeTuple.put(0, edgeTuple.getLong(0) + offset);
+                edgeTuple.put(1, edgeTuple.getLong(1) + offset);
+            }
+        }
+    }
+
     @Override
     public Boolean run() {
         if (analysisMode != 0)
@@ -260,8 +288,11 @@ public class PCodeExtractorV2 extends BaseTool {
             offset = getLoadingOffsetFromOriginalBase();
         }
         if (offset != null && offset != 0) {
-            ColoredPrint.info("Rebase program to %x. ", program.getImageBase().add(-offset).getOffset());
-            AnalysisHelper.rebaseProgram(program, program.getImageBase().add(-offset));
+            // // Rebasing program here seems to not invaliding the address-related constant-folding results, which introduces errors during further analysis. 
+            // // It is known to make it impossible to extract function symbols and constant strings in the MIPS arch. 
+            // ColoredPrint.info("Rebase program to %x. ", program.getImageBase().add(-offset).getOffset());
+            // AnalysisHelper.rebaseProgram(program, program.getImageBase().add(-offset));
+            rebaseCfgInfos(cfgInfos, offset);
         }
 
         if (extraction_mode == 1) {
@@ -347,6 +378,7 @@ public class PCodeExtractorV2 extends BaseTool {
             }
             binOut.putOpt((String) oneCfgJson.get("start_ea"), dumppedGraph);
         }
+        binOut.putOpt("rebase_offset", offset == null ? 0 : offset);
         long endTime = System.currentTimeMillis();
         ColoredPrint.info(
                 String.format("Time for extraction: %.2f secs. ", (endTime - startTime) / 1000.0));

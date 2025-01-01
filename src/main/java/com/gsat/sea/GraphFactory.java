@@ -36,6 +36,8 @@ import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.lang.PrototypeModel;
 import ghidra.program.model.lang.Register;
+import ghidra.program.model.listing.DataIterator;
+import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Parameter;
@@ -58,8 +60,9 @@ public class GraphFactory {
     Program program;
     AddressSpace constantSpace;
     AddressSpace stackBaseSpace;
-    // AddressSpace memorySpace;
+    AddressSpace defaultSpace;
     long uniqueOffset = 0;
+    Map<Long, String> knownStrings;
 
     Varnode[] possibleReturnVarnodes;
     Varnode[] possibleCallArgVarnodes;
@@ -83,9 +86,9 @@ public class GraphFactory {
         Register spReg = program.getCompilerSpec().getStackPointer();
         stackPointer = new Varnode(spReg.getAddress(), spReg.getNumBytes());
         stackBaseSpace = program.getCompilerSpec().getStackBaseSpace();
-        // memorySpace = program.getAddressFactory().getDefaultAddressSpace();
+        defaultSpace = program.getAddressFactory().getDefaultAddressSpace();
         // defaultMemoryVarnode = new
-        // Varnode(storeSpace.getAddress(memorySpace.getSpaceID()), 1);
+        // Varnode(storeSpace.getAddress(defaultSpace.getSpaceID()), 1);
 
         /// Determine default varnodes where call args are placed.
         List<Varnode> possibleCallArgList = new ArrayList<>();
@@ -130,6 +133,37 @@ public class GraphFactory {
             assert returnAddrName != null;
             Register retReg = program.getLanguage().getRegister(returnAddrName);
             defaultReturnAddress = new Varnode(retReg.getAddress(), retReg.getNumBytes());
+        }
+
+        this.knownStrings = new HashMap<Long, String>();
+        findAllStrAddrs();
+    }
+
+    private void findAllStrAddrs() {
+        DataIterator dataIter = program.getListing().getData(true);
+        // for (var block: program.getMemory().getBlocks()) {
+        //     ColoredPrint.Print(block.getName()+ " | " + block.getStart().toString() + " | " + block.getEnd().toString() + "\n");
+        // }
+        // ColoredPrint.Print("===========================\n");
+        while(dataIter.hasNext()) {
+            Data dataItem = dataIter.next();
+            String typeAbbr = dataItem.getDataType().getDefaultAbbreviatedLabelPrefix();
+            Long offset = dataItem.getAddress().getOffset();
+            Boolean inDefaultSpace = dataItem.getAddress().getAddressSpace().getSpaceID() == defaultSpace.getSpaceID();
+            // TODO maybe handle all pointers into the strings. 
+            // int size = dataItem.getLength();
+            if(inDefaultSpace && typeAbbr != null && typeAbbr.equals("s")) {
+                String repr = dataItem.getDefaultValueRepresentation();
+                int size = repr.length();
+                if (size >= 4 && repr.startsWith("u8")) {
+                    repr = repr.substring(2);
+                    size -= 2;
+                }
+                if (size > 2 && repr.charAt(0) == '"' && repr.charAt(size-1) == '"')
+                    repr = repr.substring(1, size - 1);
+                // ColoredPrint.Print("addr: 0x" + Long.toString(offset, 16) + " | repr: " + repr + "\n");
+                this.knownStrings.put(offset, repr);
+            }
         }
     }
 
@@ -180,6 +214,10 @@ public class GraphFactory {
     public Varnode newStackStore() {
         int spaceId = program.getAddressFactory().getStackSpace().getSpaceID();
         return newStore(spaceId);
+    }
+
+    public Address getAddressInDefaultSpace(long offset) {
+        return defaultSpace.getAddress(offset);
     }
 
     public PcodeOp newNop(Address address) {
@@ -240,7 +278,7 @@ public class GraphFactory {
             blockMap.put(start, cfgBlock);
             var pcodeIter = bb.getIterator();
             while (pcodeIter.hasNext())
-                adaptOp(pcodeIter.next(), cfgBlock, function);
+                adaptOp(pcodeIter.next(), cfgBlock, function, true);
         }
         for (var bb : pCodeBBs) {
             SequenceNumber start = CFGBlock.getPcodeBlockStart(bb);
@@ -673,7 +711,7 @@ public class GraphFactory {
             bl.append(op);
             return;
         }
-        if (orgNumInputs == 0)
+        if (orgNumInputs == 0)  // Set first argument as the returning address. 
             op.setInput(adaptVarnode(defaultReturnAddress, seqnum, bl), 0);
         Varnode[] outNodes;
         if (function != null && function.getReturn() != null) {
@@ -694,6 +732,10 @@ public class GraphFactory {
     }
 
     void adaptOp(PcodeOp op, CFGBlock bl, Function function) {
+        adaptOp(op, bl, function, false);
+    }
+
+    void adaptOp(PcodeOp op, CFGBlock bl, Function function, Boolean mode_opt) {
         /// new PcodeOp-s can be added here, but its seqnum should be set to null.
         int opc = op.getOpcode();
         if (opc == PcodeOp.STORE || opc == PcodeOp.LOAD) {
@@ -704,7 +746,8 @@ public class GraphFactory {
             // if (opc == PcodeOp.STORE)
             //     op.setOutput(store);
             bl.append(op);
-        } else if (SOGOp.isCall(opc)) {
+        } else if (!mode_opt && SOGOp.isCall(opc)) {
+            // Call arguments should have been set in the optimized mode. 
             adaptCall(op, bl);
         } else if (opc == PcodeOp.RETURN) {
             adaptReturn(op, bl, function);

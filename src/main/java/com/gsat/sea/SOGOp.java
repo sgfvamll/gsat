@@ -218,6 +218,34 @@ public class SOGOp {
         }
     }
 
+    public static class Symbol extends BaseOp {
+        String sym;
+
+        Symbol(String value) {
+            super(-9);
+            sym = value;
+        }
+
+        @Override
+        public String toString() {
+            return "Sym("+sym+")";
+        }
+    }
+
+    public static class PtrToString extends BaseOp {
+        String value;
+
+        PtrToString(String value) {
+            super(-10);
+            this.value = value;
+        }
+
+        @Override
+        public String toString() {
+            return "S(" + value + ")";
+        }
+    }
+
     public static class Region extends BaseOp {
         protected Region(int opc) {
             super(opc);

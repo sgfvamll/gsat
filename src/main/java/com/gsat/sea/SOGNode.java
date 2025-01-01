@@ -328,4 +328,18 @@ public class SOGNode implements DAGNode<SOGNode> {
         BaseOp op = new OtherStore(spaceId, c, size);
         return new SOGNode(op, 0);
     }
+
+    public static SOGNode newSymbol(String value, Varnode definedNode) {
+        BaseOp op = new SOGOp.Symbol(value);
+        SOGNode node = new SOGNode(op, 0);
+        node.definedNode = definedNode;
+        return node;
+    }
+
+    public static SOGNode newPtrToString(String value, Varnode definedNode) {
+        BaseOp op = new PtrToString(value);
+        SOGNode node = new SOGNode(op, 0);
+        node.definedNode = definedNode;
+        return node;
+    }
 }

@@ -594,8 +594,29 @@ public class SOGBuilder {
                 continue;
             /// Link data uses from opcode inputs
             SOGNode soNNode = SOGOp.endsBlock(opc) ? blRegion : SOGNode.newSOGNodeFromOp(op);
-            for (int i = dataUseStart; i < op.getNumInputs() && i - dataUseStart < soNNode.numDataUses(); i++) {
+            next: for (int i = dataUseStart; i < op.getNumInputs() && i - dataUseStart < soNNode.numDataUses(); i++) {
                 Varnode input = op.getInput(i);
+                gettingCalleeSymbol: if ((opc == PcodeOp.CALL || opc == PcodeOp.CALLIND) && i == dataUseStart) {
+                    // String _calleeSym = input.toString();
+                    // ColoredPrint.Print(op.getSeqnum().toString() + " | calleeSym: " + _calleeSym + " for " + op.toString() + "\n");
+                    var callAddress = input.getAddress();
+                    if (callAddress.isConstantAddress()) {  // For CALLIND
+                        callAddress = graphFactory.getAddressInDefaultSpace(callAddress.getOffset());
+                    }
+                    var callee = graphFactory.getFunctionAt(callAddress);
+                    if (callee == null)
+                        break gettingCalleeSymbol;
+                    String calleeSym = callee.getName();
+                    // ColoredPrint.Print("calleeName: " + calleeSym + "\n");
+                    soNNode.setUse(i - dataUseStart, SOGNode.newSymbol(calleeSym, input));
+                    continue next;
+                }
+                if (input.isConstant() && graphFactory.knownStrings.containsKey(input.getOffset())) {
+                    // Constants to pointers to strings. 
+                    String v = graphFactory.knownStrings.get(input.getOffset());
+                    soNNode.setUse(i - dataUseStart, SOGNode.newPtrToString(v, input));
+                    continue next;
+                }
                 soNNode.setUse(i - dataUseStart, state.peekOrNew(input));
             }
             /// Link effect edges 
