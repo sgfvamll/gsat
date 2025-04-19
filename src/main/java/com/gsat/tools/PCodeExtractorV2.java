@@ -132,7 +132,7 @@ public class PCodeExtractorV2 extends BaseTool {
     }
 
     private void dumpOneFunc(JSONObject oneCfgJson) {
-        GraphFactory graphFactory = new GraphFactory(program);
+        GraphFactory graphFactory = new GraphFactory(program, isJava());
         CFGFunction cfgFunction = graphFactory.constructCfgProgramFromCFGSummary(oneCfgJson, preferRawPcode);
         String dumppedCfgFunction = graphFactory.debugCfgFunction(cfgFunction);
         if (outputFile != null) {
@@ -245,7 +245,7 @@ public class PCodeExtractorV2 extends BaseTool {
 
     @Override
     public Boolean run() {
-        if (analysisMode != 0)
+        if (analysisMode != 0 && !isJava())
             AnalysisHelper.doDecompilerParameterIDAnalysis(program);
 
         if (cfgFilePath == null || !CommonUtils.fileExists(cfgFilePath)) {
@@ -309,7 +309,7 @@ public class PCodeExtractorV2 extends BaseTool {
 
         long startTime = System.currentTimeMillis();
         ArrayList<String> errorFuncs = new ArrayList<>();
-        GraphFactory graphFactory = new GraphFactory(program);
+        GraphFactory graphFactory = new GraphFactory(program, isJava());
         JSONObject binOut = new JSONObject();
         DecompInterface decompInterface = null;
         if (outputFormat.equals("ALL")) {

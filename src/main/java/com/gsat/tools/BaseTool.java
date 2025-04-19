@@ -65,7 +65,16 @@ public abstract class BaseTool {
         };
     }
 
+    boolean isJava() {
+        return this.program.getLanguageID().toString().startsWith("JVM:");
+    }
+
     void analyzeProgram(Program program) {
+        if (isJava()) {
+            AnalysisHelper.enableJavaRelatedAnalysis(program);
+            AnalysisHelper.autoAnalyzeProgram(program);
+            return;
+        }
         if (analysisMode < 0) return;
         AnalysisHelper.enableAutoAnalysisManger(program);
         if (analysisMode == 0) return;
@@ -156,7 +165,8 @@ public abstract class BaseTool {
                     program = manager.loadBinaryProgram(programName, languageId, baseAddress);
                     break;
                 case "elf":
-                    program = manager.loadELFProgram(programName);
+                case "java":
+                    program = manager.autoLoadProgram(programName);
                     break;
                 case "ghidra":
                     program = manager.openProgram(programName);

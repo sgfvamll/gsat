@@ -5,9 +5,11 @@ import java.util.*;
 import com.gsat.sea.SOGOp.ReturnRegion;
 import com.gsat.sea.analysis.DominatorFrontiers;
 import com.gsat.sea.analysis.Dominators;
+import com.gsat.utils.ColoredPrint;
 
 import generic.stl.Pair;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.lang.ConstantPool;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.SequenceNumber;
 import ghidra.program.model.pcode.Varnode;
@@ -166,7 +168,6 @@ public class SOGBuilder {
                 result = subPieces.get(0);
             } else {
 
-                
                 assert subPieces.size() > 1;
                 result = SOGNode.newPiece(subPieces.size(), requiredRangeNode);
                 int i = 0;
@@ -505,7 +506,7 @@ public class SOGBuilder {
                     int phiType = ndefs.getKey().equals(effectNode) ? 3
                             : (ndefs.getKey().getSpace() == sotreSpaceId ? 2 : 0);
                     SOGNode phi = SOGNode.newPhi(
-                        regions.get(blId), ndefs.getKey(), numPre, phiType);
+                            regions.get(blId), ndefs.getKey(), numPre, phiType);
                     blPhiDefs.put(interval, phi);
                     if (!ndefs.getValue().contains(blId))
                         worklist.push(blId);
@@ -565,6 +566,69 @@ public class SOGBuilder {
     //     state.revert();
     // }
 
+    private SOGNode buildFromCPoolRefJava(PcodeOp op) {
+        assert (op.getNumInputs() == 4);
+        Varnode idx = op.getInput(1), optype = op.getInput(2);
+        long ref[] = new long[2];
+        if (!idx.getAddress().isConstantAddress() || !optype.getAddress().isConstantAddress())
+            return null;
+        ref[0] = idx.getOffset();
+        ref[1] = optype.getOffset();
+        var record = graphFactory.cPoolJava.getRecord(ref);
+        if (record == null)
+            return null;
+        // ColoredPrint.Print("CPoolRecord: " + record.toString() + "\n");
+        if (record.tag == ConstantPool.STRING_LITERAL) {
+            String s = new String(record.byteData);
+            // ColoredPrint.Print("CPoolString: " + s + "\n");
+            return SOGNode.newPtrToString(s, op.getOutput());
+        } else if (record.tag == ConstantPool.POINTER_METHOD ||
+                record.tag == ConstantPool.CLASS_REFERENCE) {
+            String s = record.token != null ? record.token : "null";
+            // ColoredPrint.Print("CPoolClassOrMethod: " + s + "\n");
+            return SOGNode.newSymbol(s, op.getOutput());
+        } else if (record.tag == ConstantPool.PRIMITIVE) {
+            long v = record.value;  // TODO Fix for float/double. 
+            int w = record.token.equals("long") ? 64 : 32;
+            return SOGNode.newConstant(v, w);
+        }
+        return null;
+    }
+
+    private SOGNode buildFromNode(PcodeOp op, SOGNode blRegion) {
+        int opc = op.getOpcode(), dataUseStart = SOGOp.dataUseStart(opc);
+        /// Link data uses from opcode inputs
+        SOGNode soNNode = SOGOp.endsBlock(opc) ? blRegion : SOGNode.newSOGNodeFromOp(op);
+        next: for (int i = dataUseStart; i < op.getNumInputs() && i - dataUseStart < soNNode.numDataUses(); i++) {
+            Varnode input = op.getInput(i);
+            gettingCalleeSymbol: if (!graphFactory.isJava && (opc == PcodeOp.CALL || opc == PcodeOp.CALLIND)
+                    && i == dataUseStart) {
+                // String _calleeSym = input.toString();
+                // ColoredPrint.Print(op.getSeqnum().toString() + " | calleeSym: " + _calleeSym + " for " + op.toString() + "\n");
+                var callAddress = input.getAddress();
+                if (callAddress.isConstantAddress()) { // For CALLIND
+                    callAddress = graphFactory.getAddressInDefaultSpace(callAddress.getOffset());
+                }
+                var callee = graphFactory.getFunctionAt(callAddress);
+                if (callee == null)
+                    break gettingCalleeSymbol;
+                String calleeSym = callee.getName();
+                // ColoredPrint.Print("calleeName: " + calleeSym + "\n");
+                soNNode.setUse(i - dataUseStart, SOGNode.newSymbol(calleeSym, input));
+                continue next;
+            }
+            if (!graphFactory.isJava && input.isConstant()
+                    && graphFactory.knownStrings.containsKey(input.getOffset())) {
+                // Constants to pointers to strings. 
+                String v = graphFactory.knownStrings.get(input.getOffset());
+                soNNode.setUse(i - dataUseStart, SOGNode.newPtrToString(v, input));
+                continue next;
+            }
+            soNNode.setUse(i - dataUseStart, state.peekOrNew(input));
+        }
+        return soNNode;
+    }
+
     private void buildOneBlock(CFGBlock bl) {
         int blId = bl.id();
         SOGNode blRegion = regions.get(blId);
@@ -574,7 +638,7 @@ public class SOGBuilder {
         int opIdx = 0, numOps = bl.numOps();
         for (PcodeOp op : bl.getPcodeOps()) {
             opIdx += 1;
-            int opc = op.getOpcode(), dataUseStart = SOGOp.dataUseStart(opc);
+            int opc = op.getOpcode();
             if (opc == PcodeOp.COPY) {
                 /// Omit COPY
                 Varnode input = op.getInput(0), out = op.getOutput();
@@ -590,34 +654,14 @@ public class SOGBuilder {
             /// opt model may violate the following assertion (succ returns). 
             // assert opIdx == numOps || !SOGOp.endsBlock(opc); 
             /// TODO May fix it. 
-            if (opIdx != numOps && SOGOp.endsBlock(opc)) 
+            if (opIdx != numOps && SOGOp.endsBlock(opc))
                 continue;
-            /// Link data uses from opcode inputs
-            SOGNode soNNode = SOGOp.endsBlock(opc) ? blRegion : SOGNode.newSOGNodeFromOp(op);
-            next: for (int i = dataUseStart; i < op.getNumInputs() && i - dataUseStart < soNNode.numDataUses(); i++) {
-                Varnode input = op.getInput(i);
-                gettingCalleeSymbol: if ((opc == PcodeOp.CALL || opc == PcodeOp.CALLIND) && i == dataUseStart) {
-                    // String _calleeSym = input.toString();
-                    // ColoredPrint.Print(op.getSeqnum().toString() + " | calleeSym: " + _calleeSym + " for " + op.toString() + "\n");
-                    var callAddress = input.getAddress();
-                    if (callAddress.isConstantAddress()) {  // For CALLIND
-                        callAddress = graphFactory.getAddressInDefaultSpace(callAddress.getOffset());
-                    }
-                    var callee = graphFactory.getFunctionAt(callAddress);
-                    if (callee == null)
-                        break gettingCalleeSymbol;
-                    String calleeSym = callee.getName();
-                    // ColoredPrint.Print("calleeName: " + calleeSym + "\n");
-                    soNNode.setUse(i - dataUseStart, SOGNode.newSymbol(calleeSym, input));
-                    continue next;
-                }
-                if (input.isConstant() && graphFactory.knownStrings.containsKey(input.getOffset())) {
-                    // Constants to pointers to strings. 
-                    String v = graphFactory.knownStrings.get(input.getOffset());
-                    soNNode.setUse(i - dataUseStart, SOGNode.newPtrToString(v, input));
-                    continue next;
-                }
-                soNNode.setUse(i - dataUseStart, state.peekOrNew(input));
+            SOGNode soNNode = null;
+            if (graphFactory.isJava && opc == PcodeOp.CPOOLREF) {
+                soNNode = buildFromCPoolRefJava(op);
+            }
+            if (soNNode == null) {
+                soNNode = buildFromNode(op, blRegion);
             }
             /// Link effect edges 
             if (SOGOp.useOtherEffect(opc))
@@ -635,7 +679,7 @@ public class SOGBuilder {
             }
             List<SOGNode> lst = postEffectUse.get(op.getSeqnum());
             if (lst != null) {
-                for (SOGNode node: lst) {
+                for (SOGNode node : lst) {
                     node.addMemoryEffectUse(state.peekOrNew(memoryNode));
                     node.addOtherEffectUse(state.peekOrNew(effectNode));
                 }

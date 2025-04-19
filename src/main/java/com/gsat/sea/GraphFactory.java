@@ -1,5 +1,6 @@
 package com.gsat.sea;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -26,6 +27,7 @@ import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.decompiler.DecompiledFunction;
+import ghidra.app.util.pcodeInject.ConstantPoolJava;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressFactory;
 import ghidra.program.model.address.AddressSet;
@@ -58,6 +60,8 @@ public class GraphFactory {
     AddressSpace newUniqueSpace = new GenericAddressSpace(
             "NewUnique", 32, AddressSpace.TYPE_UNIQUE, 0x329);
     Program program;
+    boolean isJava;
+    ConstantPoolJava cPoolJava;
     AddressSpace constantSpace;
     AddressSpace stackBaseSpace;
     AddressSpace defaultSpace;
@@ -77,8 +81,10 @@ public class GraphFactory {
     DecompInterface decompInterface1 = null;
     DecompInterface decompInterface2 = null;
 
-    public GraphFactory(Program program) {
+    public GraphFactory(Program program, boolean isJava) {
         this.program = program;
+        this.isJava = isJava;
+        this.knownStrings = new HashMap<Long, String>();
         constantSpace = program.getAddressFactory().getConstantSpace();
 
         PrototypeModel defaultCC = program.getCompilerSpec().getDefaultCallingConvention();
@@ -89,6 +95,14 @@ public class GraphFactory {
         defaultSpace = program.getAddressFactory().getDefaultAddressSpace();
         // defaultMemoryVarnode = new
         // Varnode(storeSpace.getAddress(defaultSpace.getSpaceID()), 1);
+
+        if (isJava) {
+            getJavaConstantPool();
+            return;
+        }
+
+        /// Collect string constants. 
+        findAllStrAddrs();
 
         /// Determine default varnodes where call args are placed.
         List<Varnode> possibleCallArgList = new ArrayList<>();
@@ -134,9 +148,15 @@ public class GraphFactory {
             Register retReg = program.getLanguage().getRegister(returnAddrName);
             defaultReturnAddress = new Varnode(retReg.getAddress(), retReg.getNumBytes());
         }
+    }
 
-        this.knownStrings = new HashMap<Long, String>();
-        findAllStrAddrs();
+    private void getJavaConstantPool() {
+        try {
+            cPoolJava = new ConstantPoolJava(program);
+        } catch (IOException e) {
+            ColoredPrint.error(e.toString());
+            return;
+        }
     }
 
     private void findAllStrAddrs() {
@@ -746,7 +766,7 @@ public class GraphFactory {
             // if (opc == PcodeOp.STORE)
             //     op.setOutput(store);
             bl.append(op);
-        } else if (!mode_opt && SOGOp.isCall(opc)) {
+        } else if (!isJava && !mode_opt && SOGOp.isCall(opc)) {
             // Call arguments should have been set in the optimized mode. 
             adaptCall(op, bl);
         } else if (opc == PcodeOp.RETURN) {

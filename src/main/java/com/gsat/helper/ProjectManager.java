@@ -98,7 +98,7 @@ public class ProjectManager {
         this.programs = new ArrayList<>();
     }
 
-    public Program loadELFProgram(String programPath)
+    public Program autoLoadProgram(String programPath)
             throws CancelledException, DuplicateNameException, InvalidNameException, VersionException, IOException {
         File programFile = new File(programPath);
         MessageLog messageLog = new MessageLog();

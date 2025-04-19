@@ -53,6 +53,14 @@ public class AnalysisHelper {
         program.endTransaction(txId, true);
     }
 
+    public static void enableJavaRelatedAnalysis(Program program) {
+        int txId = program.startTransaction("OptionChanged-java");
+        Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
+        options.setBoolean("Java Class Analyzer", true);
+        options.setBoolean("Jvm Switch Analyzer", true);
+        program.endTransaction(txId, true);
+    }
+
     public static void enableAutoAnalysisManger(Program program) {
         // AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
 
