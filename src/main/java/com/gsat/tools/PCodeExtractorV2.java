@@ -336,6 +336,10 @@ public class PCodeExtractorV2 extends BaseTool {
             // if (oneCfgJson.getString("start_ea").equals("0x128df0")) {
             //     ColoredPrint.info("123");
             // }
+            if (oneCfgJson.getJSONArray("nodes").length() == 0) {
+                /// Skip empty functions. 
+                continue;
+            }
             CFGFunction cfgFunction = graphFactory.constructCfgProgramFromCFGSummary(oneCfgJson, preferRawPcode);
             if (cfgFunction == null) {
                 errorFuncs.add(oneCfgJson.getString("start_ea"));
